@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voxhands"
+version = "0.1.0"
+description = "Voice-controlled dual-arm tabletop assistant MVP"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+voxhands = "voxhands.server:main"
+

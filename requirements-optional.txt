@@ -1,0 +1,7 @@
+# Optional integrations. The core MVP uses only Python's standard library.
+openvino==2026.3.0
+openvino-genai==2026.3.0
+speechmatics-rt
+mujoco
+lerobot
+

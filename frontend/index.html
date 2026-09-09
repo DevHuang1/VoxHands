@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VoxHands — Dual-arm voice control</title>
+    <style>
+      :root {
+        --bg: #071018;
+        --panel: rgba(15, 29, 41, 0.9);
+        --panel-2: #102333;
+        --line: rgba(160, 199, 218, 0.15);
+        --text: #e9f1f4;
+        --muted: #86a0ad;
+        --cyan: #66e1dc;
+        --blue: #62a6ff;
+        --gold: #f5c86b;
+        --green: #76e0a1;
+        --red: #ff766f;
+        --shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--text);
+        background: radial-gradient(circle at 85% 0%, #123549 0, transparent 34%), var(--bg);
+        font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      button, input { font: inherit; }
+      button { cursor: pointer; }
+      .shell { width: min(1420px, calc(100% - 44px)); margin: 0 auto; padding: 28px 0 40px; }
+      .topbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 34px; }
+      .brand { display: flex; align-items: center; gap: 13px; }
+      .mark { width: 39px; height: 39px; border: 1px solid rgba(102, 225, 220, .5); border-radius: 12px; display: grid; place-items: center; color: var(--cyan); background: linear-gradient(145deg, rgba(102,225,220,.18), rgba(98,166,255,.08)); box-shadow: 0 0 24px rgba(102,225,220,.1); }
+      .brand strong { letter-spacing: .06em; font-size: 16px; }
+      .brand span { color: var(--muted); font-size: 12px; display: block; margin-top: 2px; }
+      .top-status { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+      .dot { width: 7px; height: 7px; background: var(--green); border-radius: 50%; box-shadow: 0 0 12px var(--green); }
+      .hero { display: flex; align-items: end; justify-content: space-between; gap: 30px; margin-bottom: 24px; }
+      h1 { font-size: clamp(34px, 5vw, 64px); line-height: .98; letter-spacing: -.06em; margin: 0; max-width: 700px; font-weight: 680; }
+      .hero p { color: var(--muted); max-width: 460px; margin: 0 0 4px; font-size: 15px; }
+      .layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, .72fr); gap: 18px; align-items: start; }
+      .panel { border: 1px solid var(--line); background: linear-gradient(145deg, rgba(19, 39, 54, .92), rgba(9, 21, 31, .93)); border-radius: 19px; box-shadow: var(--shadow); }
+      .stage-panel { padding: 18px; }
+      .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 15px; }
+      .eyebrow { text-transform: uppercase; letter-spacing: .14em; color: var(--muted); font-size: 10px; font-weight: 700; }
+      .stage-title { font-size: 19px; margin: 3px 0 0; letter-spacing: -.02em; }
+      .status-pill { border: 1px solid rgba(118,224,161,.3); color: var(--green); background: rgba(118,224,161,.07); border-radius: 999px; padding: 6px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+      .status-pill.running { color: var(--cyan); border-color: rgba(102,225,220,.32); background: rgba(102,225,220,.08); }
+      .status-pill.blocked { color: var(--red); border-color: rgba(255,118,111,.32); background: rgba(255,118,111,.08); }
+      .scene { position: relative; overflow: hidden; height: 450px; border: 1px solid rgba(160,199,218,.15); border-radius: 14px; background: linear-gradient(rgba(16, 44, 58, .55), rgba(7, 24, 35, .9)), repeating-linear-gradient(0deg, transparent 0 40px, rgba(147, 209, 218, .07) 41px), repeating-linear-gradient(90deg, transparent 0 40px, rgba(147, 209, 218, .07) 41px); }
+      .scene.running { box-shadow: inset 0 0 45px rgba(102,225,220,.08), 0 0 24px rgba(102,225,220,.1); }
+      .scene:after { content: "SIMULATED CAMERA / TABLETOP 01"; position: absolute; right: 13px; bottom: 11px; color: rgba(210,235,240,.45); letter-spacing: .13em; font-size: 9px; }
+      .red-zone { position: absolute; border: 1px dashed rgba(255,118,111,.72); background: rgba(255,89,86,.11); border-radius: 8px; }
+      .red-zone span { position: absolute; top: 7px; left: 9px; color: rgba(255,147,141,.8); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+      .target { position: absolute; transform: translate(-50%, -50%); width: 68px; height: 68px; border: 1px dashed rgba(102,225,220,.55); border-radius: 50%; display: grid; place-items: center; color: rgba(142,224,224,.72); font-size: 9px; text-align: center; transition: opacity .3s, transform .3s; }
+      .target:before { content: ""; position: absolute; inset: 9px; border: 1px solid rgba(102,225,220,.22); border-radius: 50%; }
+      .target span { position: relative; max-width: 48px; }
+      .object { position: absolute; transform: translate(-50%, -50%); width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; color: #06101a; font-weight: 800; font-size: 10px; text-align: center; box-shadow: 0 7px 20px rgba(0,0,0,.24), inset 0 0 0 2px rgba(255,255,255,.35); transition: left .42s cubic-bezier(.22,.8,.3,1), top .42s cubic-bezier(.22,.8,.3,1), opacity .25s, box-shadow .25s; z-index: 3; }
+      .object.carrying { box-shadow: 0 0 0 5px rgba(102,225,220,.17), 0 0 24px rgba(102,225,220,.45), inset 0 0 0 2px rgba(255,255,255,.6); }
+      .object span { filter: drop-shadow(0 1px 0 rgba(255,255,255,.35)); }
+      .arm { position: absolute; top: 16%; width: 17px; height: 105px; border-radius: 12px; background: linear-gradient(90deg, #43677e, #90c1ca, #31566b); transform-origin: 50% 0; z-index: 2; box-shadow: 0 0 18px rgba(102,225,220,.14); transition: left .42s cubic-bezier(.22,.8,.3,1), top .42s cubic-bezier(.22,.8,.3,1), transform .42s cubic-bezier(.22,.8,.3,1), box-shadow .25s; }
+      .arm.moving { box-shadow: 0 0 22px rgba(102,225,220,.5); animation: armPulse .7s ease-in-out infinite alternate; }
+      .arm:after { content: ""; position: absolute; bottom: -8px; left: -8px; width: 33px; height: 17px; border-radius: 12px 12px 4px 4px; background: #a3d3d4; }
+      .arm.left { left: 19%; transform: rotate(-25deg); }
+      .arm.right { left: 81%; transform: rotate(25deg); }
+      @keyframes armPulse { from { filter: brightness(1); } to { filter: brightness(1.3); } }
+      .arm-label { position: absolute; top: 12px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+      .arm-label.left { left: 15px; } .arm-label.right { right: 15px; }
+      .scene-legend { display: flex; flex-wrap: wrap; gap: 18px; padding: 13px 2px 0; color: var(--muted); font-size: 11px; }
+      .legend-item { display: inline-flex; align-items: center; gap: 7px; }
+      .legend-key { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+      .right-col { display: grid; gap: 18px; }
+      .command-panel { padding: 19px; }
+      .command-panel h2, .events-panel h2 { margin: 4px 0 14px; font-size: 19px; letter-spacing: -.03em; }
+      .command-form { display: flex; gap: 8px; margin-bottom: 12px; }
+      .command-input { min-width: 0; flex: 1; color: var(--text); background: rgba(1,10,17,.5); border: 1px solid rgba(160,199,218,.2); border-radius: 10px; padding: 12px 13px; outline: none; }
+      .command-input:focus { border-color: rgba(102,225,220,.7); box-shadow: 0 0 0 3px rgba(102,225,220,.1); }
+      .primary { border: 0; color: #06151d; background: var(--cyan); border-radius: 10px; padding: 0 15px; font-weight: 800; }
+      .primary:hover { background: #9af3ee; }
+      .secondary { border: 1px solid rgba(160,199,218,.2); color: var(--text); background: rgba(160,199,218,.06); border-radius: 9px; padding: 8px 10px; font-size: 11px; }
+      .secondary:hover { border-color: rgba(102,225,220,.55); }
+      .quick { display: flex; flex-wrap: wrap; gap: 7px; }
+      .quick button { color: var(--muted); }
+      .transcript { border: 1px solid rgba(160,199,218,.12); background: rgba(0,7,12,.25); border-radius: 12px; padding: 13px; margin-top: 15px; }
+      .transcript-text { color: var(--text); font-size: 13px; margin-top: 7px; min-height: 39px; }
+      .source-label { color: var(--muted); font-size: 10px; margin-top: 8px; }
+      .plan-panel { padding: 19px; }
+      .plan-meta { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+      .plan-id { color: var(--muted); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .action { border-top: 1px solid var(--line); padding: 13px 0; }
+      .action:first-child { border-top: 0; padding-top: 2px; }
+      .action-top { display: flex; justify-content: space-between; gap: 9px; }
+      .action-name { font-weight: 700; }
+      .action-status { color: var(--cyan); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+      .action-status.placed { color: var(--green); }
+      .action-route { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; margin: 6px 0 8px; }
+      .progress { height: 5px; background: rgba(160,199,218,.11); border-radius: 99px; overflow: hidden; }
+      .progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--blue), var(--cyan)); transition: width .25s; }
+      .empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
+      .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; }
+      .metric { padding: 15px; border: 1px solid var(--line); background: rgba(15,29,41,.7); border-radius: 14px; }
+      .metric-label { color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-size: 9px; }
+      .metric-value { margin-top: 7px; font-size: 21px; letter-spacing: -.04em; }
+      .metric-unit { color: var(--muted); font-size: 10px; margin-left: 3px; }
+      .bottom-grid { display: grid; grid-template-columns: 1fr .9fr; gap: 18px; margin-top: 18px; }
+      .events-panel, .runtime-panel { padding: 19px; }
+      .events { display: grid; gap: 0; max-height: 235px; overflow: auto; }
+      .event { display: grid; grid-template-columns: 76px 1fr; gap: 10px; border-top: 1px solid var(--line); padding: 10px 0; }
+      .event:first-child { border-top: 0; }
+      .event-time { color: var(--muted); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .event-kind { text-transform: uppercase; letter-spacing: .1em; color: var(--cyan); font-size: 9px; font-weight: 800; }
+      .event-message { color: #c6d6dc; font-size: 12px; margin-top: 2px; }
+      .runtime-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding: 13px 0; }
+      .runtime-row:first-of-type { border-top: 0; }
+      .runtime-name { font-weight: 700; }
+      .runtime-detail { color: var(--muted); font-size: 11px; margin-top: 2px; }
+      .runtime-badge { font-size: 10px; border-radius: 999px; padding: 5px 8px; color: var(--muted); background: rgba(160,199,218,.08); white-space: nowrap; }
+      .runtime-badge.ready { color: var(--green); background: rgba(118,224,161,.08); }
+      @media (max-width: 980px) { .layout, .bottom-grid { grid-template-columns: 1fr; } .hero { align-items: start; flex-direction: column; } }
+      @media (max-width: 620px) { .shell { width: min(100% - 24px, 1420px); padding-top: 18px; } .topbar { margin-bottom: 22px; } .scene { height: 350px; } .metrics { grid-template-columns: repeat(2, 1fr); } .command-form { flex-direction: column; } .primary { padding: 11px; } }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand"><div class="mark">◈</div><div><strong>VOXHANDS</strong><span>dual-arm edge control lab</span></div></div>
+        <div class="top-status"><i class="dot"></i><span id="topStatus">SIMULATOR ONLINE</span></div>
+      </header>
+
+      <section class="hero">
+        <div><div class="eyebrow">Physical AI / tabletop 01</div><h1>Give both hands<br />a job.</h1></div>
+        <p>Speak a task. VoxHands turns it into a constrained plan, checks the camera scene, and coordinates two simulated arms.</p>
+      </section>
+
+      <section class="layout">
+        <div>
+          <article class="panel stage-panel">
+            <div class="panel-head"><div><div class="eyebrow">Live camera view</div><div class="stage-title">Table-setting workspace</div></div><div id="statusPill" class="status-pill">IDLE</div></div>
+            <div id="scene" class="scene"><div class="arm-label left">left arm</div><div class="arm-label right">right arm</div><div id="leftArm" class="arm left"></div><div id="rightArm" class="arm right"></div></div>
+            <div class="scene-legend"><span class="legend-item"><i class="legend-key" style="background:#62a6ff"></i>object</span><span class="legend-item"><i class="legend-key" style="border:1px dashed #66e1dc"></i>target</span><span class="legend-item"><i class="legend-key" style="background:#ff766f"></i>no-go zone</span></div>
+          </article>
+          <section class="metrics"><div class="metric"><div class="metric-label">Plan latency</div><div class="metric-value" id="planLatency">42<span class="metric-unit">ms</span></div></div><div class="metric"><div class="metric-label">Last run</div><div class="metric-value" id="lastRun">—</div></div><div class="metric"><div class="metric-label">Sim rate</div><div class="metric-value" id="simFps">60<span class="metric-unit">fps</span></div></div><div class="metric"><div class="metric-label">Success rate</div><div class="metric-value" id="successRate">0<span class="metric-unit">%</span></div></div></section>
+        </div>
+
+        <div class="right-col">
+          <article class="panel command-panel"><div class="eyebrow">Voice command</div><h2>Tell the hands what to do</h2><form id="commandForm" class="command-form"><input id="commandInput" class="command-input" autocomplete="off" value="Set the table for two. Put the blue plate on the left and the cup on the right. Avoid the red zone." /><button class="primary" type="submit">Run task</button></form><div class="quick"><button class="secondary" data-command="Set the table for two. Put the blue plate on the left and the cup on the right.">Table for two</button><button class="secondary" data-command="Place the fork on the left and the spoon on the right. Avoid the red zone.">Cutlery pair</button><button id="resetButton" class="secondary" type="button">Reset scene</button></div><div class="transcript"><div class="eyebrow">Transcript / <span id="transcriptStatus">waiting</span></div><div id="transcriptText" class="transcript-text">Say something to begin.</div><div id="transcriptSource" class="source-label">source: demo transcript</div></div></article>
+          <article class="panel plan-panel"><div class="panel-head"><div><div class="eyebrow">Constrained action plan</div><div class="stage-title">What the system will do</div></div><span id="planState" class="status-pill">NO PLAN</span></div><div id="planMeta" class="plan-meta"></div><div id="planList"><div class="empty">Your validated plan will appear here.</div></div></article>
+        </div>
+      </section>
+
+      <section class="bottom-grid"><article class="panel events-panel"><div class="eyebrow">Execution trace</div><h2>System events</h2><div id="events" class="events"></div></article><article class="panel runtime-panel"><div class="eyebrow">Runtime adapters</div><h2>Infrastructure status</h2><div id="runtime"></div></article></section>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      const labelStatus = (value) => String(value || 'idle').replace('_', ' ').toUpperCase();
+
+      async function post(path, body) {
+        const response = await fetch(path, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {}) });
+        return response.json();
+      }
+
+      function renderScene(state) {
+        const scene = $('scene');
+        scene.classList.toggle('running', state.status === 'running');
+        const zone = state.red_zone;
+        let red = scene.querySelector('.red-zone');
+        if (!red) { red = document.createElement('div'); red.className = 'red-zone'; red.innerHTML = '<span>no-go</span>'; scene.appendChild(red); }
+        red.style.left = `${zone.x * 100}%`; red.style.top = `${zone.y * 100}%`; red.style.width = `${zone.width * 100}%`; red.style.height = `${zone.height * 100}%`;
+        Object.entries(state.targets || {}).forEach(([id, target]) => { let node = scene.querySelector(`[data-target-id="${id}"]`); if (!node) { node = document.createElement('div'); node.className = 'target'; node.dataset.targetId = id; node.innerHTML = `<span>${escapeHtml(target.label)}</span>`; scene.appendChild(node); } node.style.left = `${target.x * 100}%`; node.style.top = `${target.y * 100}%`; });
+        const actions = Object.fromEntries((state.plan?.actions || []).map((action) => [action.object_id, action]));
+        Object.entries(state.objects || {}).forEach(([id, object]) => { let node = scene.querySelector(`[data-object-id="${id}"]`); if (!node) { node = document.createElement('div'); node.className = 'object'; node.dataset.objectId = id; node.innerHTML = `<span>${escapeHtml(object.label)}</span>`; scene.appendChild(node); } node.style.left = `${object.x * 100}%`; node.style.top = `${object.y * 100}%`; node.style.background = object.color; node.classList.toggle('carrying', ['gripping', 'carrying', 'placing'].includes(actions[id]?.status)); });
+        ['left', 'right'].forEach((side) => { const arm = state.arms?.[side]; const node = $(`${side}Arm`); if (!arm || !node) return; node.style.left = `${arm.x * 100}%`; node.style.top = `${Math.max(0.06, arm.y) * 100}%`; node.style.transform = `translate(-50%, -6%) rotate(${arm.angle}deg)`; node.classList.toggle('moving', state.status === 'running'); });
+      }
+
+      function renderPlan(plan) {
+        $('planList').innerHTML = '';
+        if (!plan) { $('planState').textContent = 'NO PLAN'; $('planState').className = 'status-pill'; $('planMeta').innerHTML = ''; $('planList').innerHTML = '<div class="empty">Your validated plan will appear here.</div>'; return; }
+        $('planState').textContent = labelStatus(plan.status); $('planState').className = `status-pill ${plan.status === 'executing' ? 'running' : plan.status === 'blocked' ? 'blocked' : ''}`;
+        $('planMeta').innerHTML = `<span class="plan-id">${escapeHtml(plan.id)} · ${escapeHtml(plan.intent)}</span><span class="plan-id">${plan.actions.length} action${plan.actions.length === 1 ? '' : 's'}</span>`;
+        if (plan.safety_issues.length) { $('planList').innerHTML = `<div class="empty" style="color:var(--red)">${escapeHtml(plan.safety_issues.join(' '))}</div>`; return; }
+        plan.actions.forEach((action) => { const node = document.createElement('div'); node.className = 'action'; node.innerHTML = `<div class="action-top"><span class="action-name">${escapeHtml(action.object_label)}</span><span class="action-status ${action.status === 'placed' ? 'placed' : ''}">${escapeHtml(action.status)}</span></div><div class="action-route"><span>${escapeHtml(action.arm)} arm</span><span>→ ${escapeHtml(action.target_label)}</span></div><div class="progress"><i style="width:${action.progress}%"></i></div>`; $('planList').appendChild(node); });
+      }
+
+      function renderEvents(events) {
+        $('events').innerHTML = (events || []).slice().reverse().map((event) => { const time = new Date(event.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}); return `<div class="event"><div class="event-time">${escapeHtml(time)}</div><div><div class="event-kind">${escapeHtml(event.kind)}</div><div class="event-message">${escapeHtml(event.message)}</div></div></div>`; }).join('') || '<div class="empty">No events yet.</div>';
+      }
+
+      function renderRuntime(runtime) {
+        const entries = [runtime.openvino, runtime.speechmatics, runtime.simulator];
+        $('runtime').innerHTML = entries.map((item) => { const ready = item.available; const detail = item.name === 'OpenVINO' ? (ready ? `${(item.devices || []).join(', ') || 'runtime detected'}` : 'Install optional runtime for hardware inference') : item.name === 'Speechmatics' ? (ready ? 'Realtime credentials configured' : 'Demo transcript mode; API key optional') : 'Server-side scene and arm control'; return `<div class="runtime-row"><div><div class="runtime-name">${escapeHtml(item.name)}</div><div class="runtime-detail">${escapeHtml(detail)}</div></div><span class="runtime-badge ${ready ? 'ready' : ''}">${ready ? 'READY' : 'DEMO'}</span></div>`; }).join('');
+      }
+
+      function render(state) {
+        $('topStatus').textContent = `${labelStatus(state.status)} · SIMULATOR`;
+        $('statusPill').textContent = labelStatus(state.status); $('statusPill').className = `status-pill ${state.status === 'running' ? 'running' : state.status === 'blocked' ? 'blocked' : ''}`;
+        $('transcriptText').textContent = state.transcript.text || 'Say something to begin.'; $('transcriptStatus').textContent = state.transcript.status; $('transcriptSource').textContent = `source: ${state.transcript.source}`;
+        $('planLatency').innerHTML = `${state.metrics.plan_latency_ms}<span class="metric-unit">ms</span>`; $('lastRun').innerHTML = state.metrics.last_run_ms == null ? '—' : `${state.metrics.last_run_ms}<span class="metric-unit">ms</span>`; $('simFps').innerHTML = `${state.metrics.sim_fps}<span class="metric-unit">fps</span>`; $('successRate').innerHTML = `${state.metrics.success_rate}<span class="metric-unit">%</span>`;
+        renderScene(state); renderPlan(state.plan); renderEvents(state.events); renderRuntime(state.runtime);
+      }
+
+      async function refresh() { try { render(await (await fetch('/api/state', {cache:'no-store'})).json()); } catch (_) { $('topStatus').textContent = 'SERVER OFFLINE'; } }
+      $('commandForm').addEventListener('submit', async (event) => { event.preventDefault(); const input = $('commandInput'); if (!input.value.trim()) return; await post('/api/command', {text: input.value.trim()}); await refresh(); });
+      document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', async () => { $('commandInput').value = button.dataset.command; await post('/api/command', {text: button.dataset.command}); await refresh(); }));
+      $('resetButton').addEventListener('click', async () => { await post('/api/reset'); await refresh(); });
+      refresh(); setInterval(refresh, 420);
+    </script>
+  </body>
+</html>
