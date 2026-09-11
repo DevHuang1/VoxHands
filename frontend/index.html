@@ -3,209 +3,538 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>VoxHands — Dual-arm voice control</title>
+    <title>VoxHands — Industrial HMI</title>
     <style>
-      :root {
-        --bg: #071018;
-        --panel: rgba(15, 29, 41, 0.9);
-        --panel-2: #102333;
-        --line: rgba(160, 199, 218, 0.15);
-        --text: #e9f1f4;
-        --muted: #86a0ad;
-        --cyan: #66e1dc;
-        --blue: #62a6ff;
-        --gold: #f5c86b;
-        --green: #76e0a1;
-        --red: #ff766f;
-        --shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        color: var(--text);
-        background: radial-gradient(circle at 85% 0%, #123549 0, transparent 34%), var(--bg);
-        font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-      button, input { font: inherit; }
-      button { cursor: pointer; }
-      .shell { width: min(1420px, calc(100% - 44px)); margin: 0 auto; padding: 28px 0 40px; }
-      .topbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 34px; }
-      .brand { display: flex; align-items: center; gap: 13px; }
-      .mark { width: 39px; height: 39px; border: 1px solid rgba(102, 225, 220, .5); border-radius: 12px; display: grid; place-items: center; color: var(--cyan); background: linear-gradient(145deg, rgba(102,225,220,.18), rgba(98,166,255,.08)); box-shadow: 0 0 24px rgba(102,225,220,.1); }
-      .brand strong { letter-spacing: .06em; font-size: 16px; }
-      .brand span { color: var(--muted); font-size: 12px; display: block; margin-top: 2px; }
-      .top-status { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
-      .dot { width: 7px; height: 7px; background: var(--green); border-radius: 50%; box-shadow: 0 0 12px var(--green); }
-      .hero { display: flex; align-items: end; justify-content: space-between; gap: 30px; margin-bottom: 24px; }
-      h1 { font-size: clamp(34px, 5vw, 64px); line-height: .98; letter-spacing: -.06em; margin: 0; max-width: 700px; font-weight: 680; }
-      .hero p { color: var(--muted); max-width: 460px; margin: 0 0 4px; font-size: 15px; }
-      .layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, .72fr); gap: 18px; align-items: start; }
-      .panel { border: 1px solid var(--line); background: linear-gradient(145deg, rgba(19, 39, 54, .92), rgba(9, 21, 31, .93)); border-radius: 19px; box-shadow: var(--shadow); }
-      .stage-panel { padding: 18px; }
-      .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 15px; }
-      .eyebrow { text-transform: uppercase; letter-spacing: .14em; color: var(--muted); font-size: 10px; font-weight: 700; }
-      .stage-title { font-size: 19px; margin: 3px 0 0; letter-spacing: -.02em; }
-      .status-pill { border: 1px solid rgba(118,224,161,.3); color: var(--green); background: rgba(118,224,161,.07); border-radius: 999px; padding: 6px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
-      .status-pill.running { color: var(--cyan); border-color: rgba(102,225,220,.32); background: rgba(102,225,220,.08); }
-      .status-pill.blocked { color: var(--red); border-color: rgba(255,118,111,.32); background: rgba(255,118,111,.08); }
-      .scene { position: relative; overflow: hidden; height: 450px; border: 1px solid rgba(160,199,218,.15); border-radius: 14px; background: linear-gradient(rgba(16, 44, 58, .55), rgba(7, 24, 35, .9)), repeating-linear-gradient(0deg, transparent 0 40px, rgba(147, 209, 218, .07) 41px), repeating-linear-gradient(90deg, transparent 0 40px, rgba(147, 209, 218, .07) 41px); }
-      .scene.running { box-shadow: inset 0 0 45px rgba(102,225,220,.08), 0 0 24px rgba(102,225,220,.1); }
-      .scene:after { content: "SIMULATED CAMERA / TABLETOP 01"; position: absolute; right: 13px; bottom: 11px; color: rgba(210,235,240,.45); letter-spacing: .13em; font-size: 9px; }
-      .red-zone { position: absolute; border: 1px dashed rgba(255,118,111,.72); background: rgba(255,89,86,.11); border-radius: 8px; }
-      .red-zone span { position: absolute; top: 7px; left: 9px; color: rgba(255,147,141,.8); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
-      .target { position: absolute; transform: translate(-50%, -50%); width: 68px; height: 68px; border: 1px dashed rgba(102,225,220,.55); border-radius: 50%; display: grid; place-items: center; color: rgba(142,224,224,.72); font-size: 9px; text-align: center; transition: opacity .3s, transform .3s; }
-      .target:before { content: ""; position: absolute; inset: 9px; border: 1px solid rgba(102,225,220,.22); border-radius: 50%; }
-      .target span { position: relative; max-width: 48px; }
-      .object { position: absolute; transform: translate(-50%, -50%); width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; color: #06101a; font-weight: 800; font-size: 10px; text-align: center; box-shadow: 0 7px 20px rgba(0,0,0,.24), inset 0 0 0 2px rgba(255,255,255,.35); transition: left .42s cubic-bezier(.22,.8,.3,1), top .42s cubic-bezier(.22,.8,.3,1), opacity .25s, box-shadow .25s; z-index: 3; }
-      .object.carrying { box-shadow: 0 0 0 5px rgba(102,225,220,.17), 0 0 24px rgba(102,225,220,.45), inset 0 0 0 2px rgba(255,255,255,.6); }
-      .object span { filter: drop-shadow(0 1px 0 rgba(255,255,255,.35)); }
-      .arm { position: absolute; top: 16%; width: 17px; height: 105px; border-radius: 12px; background: linear-gradient(90deg, #43677e, #90c1ca, #31566b); transform-origin: 50% 0; z-index: 2; box-shadow: 0 0 18px rgba(102,225,220,.14); transition: left .42s cubic-bezier(.22,.8,.3,1), top .42s cubic-bezier(.22,.8,.3,1), transform .42s cubic-bezier(.22,.8,.3,1), box-shadow .25s; }
-      .arm.moving { box-shadow: 0 0 22px rgba(102,225,220,.5); animation: armPulse .7s ease-in-out infinite alternate; }
-      .arm:after { content: ""; position: absolute; bottom: -8px; left: -8px; width: 33px; height: 17px; border-radius: 12px 12px 4px 4px; background: #a3d3d4; }
-      .arm.left { left: 19%; transform: rotate(-25deg); }
-      .arm.right { left: 81%; transform: rotate(25deg); }
-      @keyframes armPulse { from { filter: brightness(1); } to { filter: brightness(1.3); } }
-      .arm-label { position: absolute; top: 12px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
-      .arm-label.left { left: 15px; } .arm-label.right { right: 15px; }
-      .scene-legend { display: flex; flex-wrap: wrap; gap: 18px; padding: 13px 2px 0; color: var(--muted); font-size: 11px; }
-      .legend-item { display: inline-flex; align-items: center; gap: 7px; }
-      .legend-key { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
-      .right-col { display: grid; gap: 18px; }
-      .command-panel { padding: 19px; }
-      .command-panel h2, .events-panel h2 { margin: 4px 0 14px; font-size: 19px; letter-spacing: -.03em; }
-      .command-form { display: flex; gap: 8px; margin-bottom: 12px; }
-      .command-input { min-width: 0; flex: 1; color: var(--text); background: rgba(1,10,17,.5); border: 1px solid rgba(160,199,218,.2); border-radius: 10px; padding: 12px 13px; outline: none; }
-      .command-input:focus { border-color: rgba(102,225,220,.7); box-shadow: 0 0 0 3px rgba(102,225,220,.1); }
-      .primary { border: 0; color: #06151d; background: var(--cyan); border-radius: 10px; padding: 0 15px; font-weight: 800; }
-      .primary:hover { background: #9af3ee; }
-      .secondary { border: 1px solid rgba(160,199,218,.2); color: var(--text); background: rgba(160,199,218,.06); border-radius: 9px; padding: 8px 10px; font-size: 11px; }
-      .secondary:hover { border-color: rgba(102,225,220,.55); }
-      .quick { display: flex; flex-wrap: wrap; gap: 7px; }
-      .quick button { color: var(--muted); }
-      .transcript { border: 1px solid rgba(160,199,218,.12); background: rgba(0,7,12,.25); border-radius: 12px; padding: 13px; margin-top: 15px; }
-      .transcript-text { color: var(--text); font-size: 13px; margin-top: 7px; min-height: 39px; }
-      .source-label { color: var(--muted); font-size: 10px; margin-top: 8px; }
-      .plan-panel { padding: 19px; }
-      .plan-meta { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
-      .plan-id { color: var(--muted); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-      .action { border-top: 1px solid var(--line); padding: 13px 0; }
-      .action:first-child { border-top: 0; padding-top: 2px; }
-      .action-top { display: flex; justify-content: space-between; gap: 9px; }
-      .action-name { font-weight: 700; }
-      .action-status { color: var(--cyan); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
-      .action-status.placed { color: var(--green); }
-      .action-route { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; margin: 6px 0 8px; }
-      .progress { height: 5px; background: rgba(160,199,218,.11); border-radius: 99px; overflow: hidden; }
-      .progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--blue), var(--cyan)); transition: width .25s; }
-      .empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
-      .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; }
-      .metric { padding: 15px; border: 1px solid var(--line); background: rgba(15,29,41,.7); border-radius: 14px; }
-      .metric-label { color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-size: 9px; }
-      .metric-value { margin-top: 7px; font-size: 21px; letter-spacing: -.04em; }
-      .metric-unit { color: var(--muted); font-size: 10px; margin-left: 3px; }
-      .bottom-grid { display: grid; grid-template-columns: 1fr .9fr; gap: 18px; margin-top: 18px; }
-      .events-panel, .runtime-panel { padding: 19px; }
-      .events { display: grid; gap: 0; max-height: 235px; overflow: auto; }
-      .event { display: grid; grid-template-columns: 76px 1fr; gap: 10px; border-top: 1px solid var(--line); padding: 10px 0; }
-      .event:first-child { border-top: 0; }
-      .event-time { color: var(--muted); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-      .event-kind { text-transform: uppercase; letter-spacing: .1em; color: var(--cyan); font-size: 9px; font-weight: 800; }
-      .event-message { color: #c6d6dc; font-size: 12px; margin-top: 2px; }
-      .runtime-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding: 13px 0; }
-      .runtime-row:first-of-type { border-top: 0; }
-      .runtime-name { font-weight: 700; }
-      .runtime-detail { color: var(--muted); font-size: 11px; margin-top: 2px; }
-      .runtime-badge { font-size: 10px; border-radius: 999px; padding: 5px 8px; color: var(--muted); background: rgba(160,199,218,.08); white-space: nowrap; }
-      .runtime-badge.ready { color: var(--green); background: rgba(118,224,161,.08); }
-      @media (max-width: 980px) { .layout, .bottom-grid { grid-template-columns: 1fr; } .hero { align-items: start; flex-direction: column; } }
-      @media (max-width: 620px) { .shell { width: min(100% - 24px, 1420px); padding-top: 18px; } .topbar { margin-bottom: 22px; } .scene { height: 350px; } .metrics { grid-template-columns: repeat(2, 1fr); } .command-form { flex-direction: column; } .primary { padding: 11px; } }
+      :root { --bg:#071018; --panel:rgba(15,29,41,.91); --line:rgba(160,199,218,.15); --text:#e9f1f4; --muted:#86a0ad; --cyan:#66e1dc; --blue:#62a6ff; --gold:#f5c86b; --green:#76e0a1; --red:#ff766f; --shadow:0 24px 70px rgba(0,0,0,.32); }
+      * { box-sizing:border-box; } body { margin:0; min-height:100vh; color:var(--text); background:radial-gradient(circle at 85% 0%,#123549 0,transparent 34%),var(--bg); font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+      button,input { font:inherit; } button { cursor:pointer; } .shell { width:min(1420px,calc(100% - 44px)); margin:0 auto; padding:28px 0 40px; }
+      .topbar,.hero,.panel-head,.scene-overlay,.top-status { display:flex; align-items:center; } .topbar,.hero,.panel-head,.scene-overlay { justify-content:space-between; gap:18px; } .topbar { margin-bottom:34px; }
+      .brand { display:flex; align-items:center; gap:13px; } .mark { width:39px; height:39px; border:1px solid rgba(102,225,220,.5); border-radius:12px; display:grid; place-items:center; color:var(--cyan); background:linear-gradient(145deg,rgba(102,225,220,.18),rgba(98,166,255,.08)); box-shadow:0 0 24px rgba(102,225,220,.1); } .brand strong { letter-spacing:.06em; font-size:16px; } .brand span { color:var(--muted); font-size:12px; display:block; margin-top:2px; }
+      .top-status { gap:10px; color:var(--muted); font-size:12px; } .dot { width:7px; height:7px; background:var(--green); border-radius:50%; box-shadow:0 0 12px var(--green); }
+      .hero { align-items:end; margin-bottom:24px; } h1 { font-size:clamp(34px,5vw,64px); line-height:.98; letter-spacing:-.06em; margin:0; max-width:700px; font-weight:680; } .hero p { color:var(--muted); max-width:460px; margin:0 0 4px; font-size:15px; }
+      .layout { display:grid; grid-template-columns:minmax(0,1.68fr) minmax(310px,.68fr); gap:18px; align-items:start; } .panel { border:1px solid var(--line); background:linear-gradient(145deg,rgba(19,39,54,.92),rgba(9,21,31,.93)); border-radius:19px; box-shadow:var(--shadow); } .stage-panel { padding:18px; }
+      .panel-head { margin-bottom:15px; } .eyebrow { text-transform:uppercase; letter-spacing:.14em; color:var(--muted); font-size:10px; font-weight:700; } .stage-title { font-size:19px; margin:3px 0 0; letter-spacing:-.02em; } .status-pill { border:1px solid rgba(118,224,161,.3); color:var(--green); background:rgba(118,224,161,.07); border-radius:999px; padding:6px 10px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; } .status-pill.running { color:var(--cyan); border-color:rgba(102,225,220,.32); background:rgba(102,225,220,.08); } .status-pill.blocked,.status-pill.collision { color:var(--red); border-color:rgba(255,118,111,.32); background:rgba(255,118,111,.08); }
+      .scene { position:relative; overflow:hidden; height:640px; border:1px solid rgba(160,199,218,.15); border-radius:14px; background:radial-gradient(circle at 50% 35%,rgba(37,94,103,.27),transparent 45%),linear-gradient(160deg,#112b39,#071721 72%); } .scene.running { box-shadow:inset 0 0 45px rgba(102,225,220,.08),0 0 24px rgba(102,225,220,.1); } .scene.collision { box-shadow:inset 0 0 45px rgba(255,118,111,.2),0 0 24px rgba(255,118,111,.18); }
+      .scene:after { content:"3D SIM CAMERA / TABLETOP 01"; position:absolute; right:13px; bottom:11px; color:rgba(210,235,240,.45); letter-spacing:.13em; font-size:9px; pointer-events:none; } #webglMount,#fallbackMount { position:absolute; inset:0; } #webglMount canvas { display:block; width:100%; height:100%; } #fallbackCanvas { display:block; width:100%; height:100%; }
+      .scene-overlay { position:absolute; top:12px; left:14px; right:14px; pointer-events:none; z-index:4; } .camera-badge,.phase-badge { border:1px solid rgba(102,225,220,.28); border-radius:999px; padding:5px 8px; color:rgba(176,238,235,.82); background:rgba(4,17,24,.6); font-size:9px; letter-spacing:.11em; text-transform:uppercase; }
+      .scene-tools { position:absolute; right:14px; bottom:12px; z-index:5; display:flex; gap:6px; } .scene-tools button { border:1px solid rgba(160,199,218,.2); border-radius:8px; color:rgba(225,245,246,.8); background:rgba(4,17,24,.7); padding:6px 8px; font-size:9px; text-transform:uppercase; letter-spacing:.08em; } .scene-tools button:hover { border-color:var(--cyan); color:var(--cyan); }
+      .orbit-control { position:absolute; left:14px; bottom:12px; display:flex; align-items:center; gap:7px; color:rgba(210,235,240,.58); font-size:9px; letter-spacing:.1em; text-transform:uppercase; z-index:5; } .orbit-control input { width:88px; accent-color:var(--cyan); }
+      .physics-hud { position:absolute; top:52px; right:14px; z-index:5; min-width:150px; padding:9px 10px; border:1px solid rgba(160,199,218,.15); border-radius:10px; color:rgba(218,239,243,.7); background:rgba(4,17,24,.58); font-size:10px; pointer-events:none; } .physics-hud b { color:var(--cyan); font-weight:700; } .physics-hud .danger { color:var(--red); }
+      .scene-legend { display:flex; flex-wrap:wrap; gap:16px; padding:12px 2px 2px; color:var(--muted); font-size:11px; } .legend-item { display:flex; align-items:center; gap:7px; } .legend-key { width:9px; height:9px; display:inline-block; border-radius:3px; }
+      .right-col { display:grid; gap:18px; } .command-panel,.plan-panel,.events-panel,.runtime-panel { padding:20px; } h2 { font-size:18px; letter-spacing:-.025em; margin:5px 0 16px; } .command-form { display:flex; gap:8px; } .command-input { min-width:0; flex:1; color:var(--text); background:#081721; border:1px solid rgba(160,199,218,.18); border-radius:10px; padding:11px 12px; outline:none; } .command-input:focus { border-color:rgba(102,225,220,.65); box-shadow:0 0 0 3px rgba(102,225,220,.08); }
+      .primary,.secondary { border-radius:10px; padding:10px 13px; } .primary { border:1px solid rgba(102,225,220,.5); color:#051319; background:var(--cyan); font-weight:750; } .primary:hover { filter:brightness(1.08); } .secondary { border:1px solid rgba(160,199,218,.18); color:var(--muted); background:rgba(160,199,218,.05); } .secondary:hover { color:var(--text); border-color:rgba(102,225,220,.45); } .quick { display:flex; gap:7px; flex-wrap:wrap; margin-top:9px; } .quick button { font-size:11px; padding:7px 9px; } .quick .physics-test { color:#ffb6a9; border-color:rgba(255,118,111,.25); }
+      .transcript { margin-top:17px; padding-top:15px; border-top:1px solid var(--line); } .transcript-text { min-height:43px; margin-top:8px; color:#d8e7eb; font-size:14px; } .source-label { color:var(--muted); font-size:10px; } .plan-meta { display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:11px; margin:-7px 0 14px; } .plan-id { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .action { border-top:1px solid var(--line); padding:12px 0; } .action-top,.action-route { display:flex; justify-content:space-between; gap:8px; } .action-name { font-weight:650; } .action-status { color:var(--cyan); font-size:11px; text-transform:uppercase; } .action-status.placed { color:var(--green); } .action-route { color:var(--muted); font-size:11px; margin-top:4px; } .progress { height:4px; background:#0b1b25; border-radius:99px; margin-top:10px; overflow:hidden; } .progress i { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--cyan),var(--blue)); transition:width .22s ease; }
+      .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:18px; } .metric { padding:13px 14px; border:1px solid var(--line); border-radius:13px; background:rgba(9,23,33,.65); } .metric-label { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.1em; } .metric-value { margin-top:6px; font-size:22px; letter-spacing:-.04em; } .metric-unit { margin-left:3px; color:var(--muted); font-size:11px; letter-spacing:0; }
+      .bottom-grid { display:grid; grid-template-columns:1.45fr .72fr; gap:18px; margin-top:18px; } .events-panel,.runtime-panel { padding:20px; } .events,.runtime { display:grid; gap:10px; max-height:250px; overflow:auto; padding-right:3px; } .event { display:grid; grid-template-columns:68px 1fr; gap:10px; border-top:1px solid var(--line); padding-top:10px; } .event-time,.event-kind,.runtime-detail { color:var(--muted); font-size:10px; } .event-kind { color:var(--cyan); text-transform:uppercase; letter-spacing:.1em; } .event-message { font-size:12px; margin-top:2px; } .runtime-row { display:flex; justify-content:space-between; gap:12px; border-top:1px solid var(--line); padding-top:10px; } .runtime-name { font-size:12px; } .runtime-badge { color:var(--gold); border:1px solid rgba(245,200,107,.28); border-radius:999px; padding:3px 7px; height:max-content; font-size:9px; letter-spacing:.08em; } .runtime-badge.ready { color:var(--green); border-color:rgba(118,224,161,.28); } .empty { color:var(--muted); padding:13px 0; font-size:12px; }
+      @media (max-width:1100px) { .scene { height:560px; } } @media (max-width:900px) { .layout,.bottom-grid { grid-template-columns:1fr; } .hero { display:block; } .hero p { margin-top:14px; } } @media (max-width:560px) { .shell { width:min(100% - 24px,1420px); padding-top:18px; } .topbar { margin-bottom:25px; } .scene { height:420px; } .metrics { grid-template-columns:repeat(2,1fr); } .command-form { display:grid; } .physics-hud { top:48px; min-width:132px; } }
+      /* Premium operator-console layer */
+      :root { --bg:#050b12; --panel:#0b1621; --panel-raised:#0e1d2a; --panel-soft:#0a141e; --line:rgba(156,190,207,.16); --line-strong:rgba(156,190,207,.28); --text:#edf5f7; --muted:#8297a4; --faint:#536875; --cyan:#5ee1dc; --blue:#70a8ff; --green:#73dfa1; --amber:#e8b969; --red:#ff716d; --shadow:0 20px 60px rgba(0,0,0,.3); }
+      body { background:radial-gradient(circle at 76% -8%,rgba(22,65,86,.33),transparent 32%),linear-gradient(180deg,#06101a,#050b12 58%); }
+      .shell { width:min(1540px,calc(100% - 48px)); padding:18px 0 34px; }
+      .topbar { margin-bottom:18px; padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:rgba(7,17,27,.88); box-shadow:0 12px 36px rgba(0,0,0,.18); }
+      .mark { width:34px; height:34px; border-radius:8px; box-shadow:none; }
+      .brand strong { font-size:14px; letter-spacing:.12em; }
+      .top-status { gap:12px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+      .top-status .dot { width:8px; height:8px; }
+      .connection-state { color:var(--faint); border-left:1px solid var(--line); padding-left:12px; }
+      .operator-actions { display:flex; align-items:center; gap:8px; }
+      .stop-control { border:1px solid rgba(255,113,109,.52); border-radius:7px; color:#ffd5d0; background:rgba(255,113,109,.12); padding:8px 11px; font-size:10px; font-weight:750; letter-spacing:.08em; }
+      .stop-control:hover { background:rgba(255,113,109,.22); border-color:var(--red); }
+      .hero { margin-bottom:16px; align-items:end; }
+      h1 { font-size:clamp(30px,4.4vw,54px); letter-spacing:-.055em; }
+      .hero p { max-width:500px; font-size:13px; color:var(--muted); }
+      .layout { grid-template-columns:minmax(0,1.78fr) minmax(380px,.72fr); gap:14px; }
+      .panel { border-radius:11px; box-shadow:var(--shadow); background:linear-gradient(145deg,rgba(14,29,42,.96),rgba(7,16,25,.96)); }
+      .stage-panel,.command-panel,.plan-panel,.interpretation-panel,.lanes-panel,.events-panel,.runtime-panel,.telemetry-panel { padding:15px; }
+      .panel-head { margin-bottom:12px; }
+      .stage-title { font-size:17px; }
+      .status-pill { border-radius:6px; padding:5px 8px; font-size:10px; font-weight:700; }
+      .status-pill.running { color:var(--cyan); }
+      .status-pill.paused,.status-pill.attention,.status-pill.stopped { color:var(--amber); border-color:rgba(232,185,105,.38); background:rgba(232,185,105,.08); }
+      .status-pill.blocked,.status-pill.collision { color:var(--red); }
+      .scene { height:min(68vh,720px); min-height:560px; border-radius:9px; }
+      .scene-overlay { top:10px; left:11px; right:11px; }
+      .camera-badge,.phase-badge { border-radius:5px; padding:5px 7px; font-size:8px; }
+      .physics-hud { top:48px; right:11px; min-width:174px; border-radius:7px; padding:8px 9px; font-size:9px; }
+      .scene-tools { right:11px; bottom:11px; }
+      .scene-tools button,.orbit-control { border-radius:5px; }
+      .scene-legend { gap:12px; padding-top:9px; font-size:10px; }
+      .right-col { gap:12px; }
+      .command-panel h2,.plan-panel h2,.interpretation-panel h2,.lanes-panel h2,.events-panel h2,.runtime-panel h2,.telemetry-panel h2 { font-size:15px; margin:4px 0 12px; }
+      .command-form { display:grid; grid-template-columns:1fr auto auto; gap:7px; }
+      .command-input { border-radius:7px; padding:10px 11px; font-size:12px; }
+      .primary,.secondary { border-radius:7px; padding:9px 10px; font-size:11px; }
+      .primary { background:var(--cyan); }
+      .command-controls { display:flex; gap:6px; margin-top:8px; }
+      .command-controls button { flex:1; }
+      .mic-button { min-width:42px; color:var(--cyan); border-color:rgba(94,225,220,.38); }
+      .mic-button.listening { color:#061116; background:var(--cyan); box-shadow:0 0 0 4px rgba(94,225,220,.12); }
+      .voice-status { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:9px; color:var(--muted); font-size:10px; }
+      .voice-meter { height:4px; flex:1; max-width:100px; overflow:hidden; background:#09121b; border-radius:99px; }
+      .voice-meter i { display:block; width:24%; height:100%; background:var(--cyan); border-radius:inherit; }
+      .quick { margin-top:10px; }
+      .quick button { font-size:10px; padding:6px 8px; }
+      .transcript { margin-top:13px; padding-top:12px; }
+      .transcript-text { min-height:34px; margin-top:6px; font-size:12px; }
+      .execution-meta { display:flex; flex-wrap:wrap; gap:7px 12px; color:var(--muted); font-size:10px; margin:-4px 0 10px; }
+      .interpretation-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+      .data-cell { padding:8px; border:1px solid var(--line); border-radius:7px; background:rgba(5,14,22,.58); }
+      .data-cell label { display:block; color:var(--faint); font-size:9px; text-transform:uppercase; letter-spacing:.1em; }
+      .data-cell span { display:block; margin-top:3px; font-size:11px; }
+      .preflight { display:grid; gap:5px; margin:11px 0 0; padding:10px 0 0; border-top:1px solid var(--line); }
+      .preflight-item { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:10px; }
+      .preflight-item i { width:15px; height:15px; display:grid; place-items:center; border:1px solid var(--line-strong); border-radius:50%; font-style:normal; font-size:9px; }
+      .preflight-item.ok { color:var(--text); } .preflight-item.ok i { color:var(--green); border-color:rgba(115,223,161,.45); } .preflight-item.warn { color:var(--amber); } .preflight-item.fail { color:var(--red); }
+      .lane-list { display:grid; gap:7px; }
+      .lane { padding:9px; border:1px solid var(--line); border-radius:7px; background:rgba(5,14,22,.55); }
+      .lane-top,.lane-meta { display:flex; justify-content:space-between; gap:8px; }
+      .lane-name { font-size:11px; font-weight:700; } .lane-phase { color:var(--cyan); font-size:9px; text-transform:uppercase; letter-spacing:.08em; }
+      .lane-meta { margin-top:5px; color:var(--muted); font-size:9px; }
+      .lane .progress { margin-top:7px; height:3px; }
+      .bottom-grid { grid-template-columns:minmax(0,1.35fr) minmax(240px,.62fr) minmax(260px,.76fr); gap:12px; margin-top:14px; }
+      .timeline-filter { display:flex; gap:5px; flex-wrap:wrap; margin:-4px 0 9px; }
+      .timeline-filter button { border:1px solid var(--line); border-radius:5px; color:var(--muted); background:transparent; padding:4px 7px; font-size:9px; }
+      .timeline-filter button.active { color:var(--cyan); border-color:rgba(94,225,220,.42); background:rgba(94,225,220,.07); }
+      .events,.runtime { max-height:290px; }
+      .event { grid-template-columns:53px 1fr; gap:8px; padding-top:8px; }
+      .event-message { font-size:11px; }
+      .telemetry-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+      .telemetry-item { padding:8px; border:1px solid var(--line); border-radius:7px; background:rgba(5,14,22,.55); }
+      .telemetry-item label { display:block; color:var(--faint); font-size:9px; text-transform:uppercase; letter-spacing:.08em; }
+      .telemetry-item b { display:block; margin-top:4px; font-size:14px; font-weight:650; }
+      .telemetry-item small { color:var(--muted); font-size:9px; }
+      .metrics { grid-template-columns:repeat(6,1fr); gap:8px; margin-top:12px; }
+      .metric { padding:10px 11px; border-radius:8px; }
+      .metric-value { font-size:18px; }
+      .is-hidden { display:none !important; }
+      @media (max-width:1180px) { .layout { grid-template-columns:minmax(0,1.5fr) minmax(340px,.8fr); } .scene { min-height:520px; } .bottom-grid { grid-template-columns:1.2fr .7fr; } .telemetry-panel { grid-column:1/-1; } }
+      @media (max-width:900px) { .shell { width:min(100% - 28px,1540px); } .layout,.bottom-grid { grid-template-columns:1fr; } .hero { display:block; } .hero p { margin-top:12px; } .scene { height:560px; } .metrics { grid-template-columns:repeat(3,1fr); } .telemetry-panel { grid-column:auto; } }
+      @media (max-width:560px) { .shell { width:calc(100% - 20px); padding-top:12px; } .topbar,.top-status,.operator-actions { align-items:flex-start; } .topbar { flex-wrap:wrap; } .connection-state { display:none; } .stop-control { margin-left:auto; } .scene { height:430px; min-height:0; } .command-form { grid-template-columns:1fr auto; } .command-form .primary { grid-column:1/-1; } .metrics { grid-template-columns:repeat(2,1fr); } .physics-hud { top:46px; min-width:145px; } }
+      /* Industrial HMI treatment: compact, neutral, and operational rather than promotional. */
+      :root { --bg:#0a1015; --panel:#111b22; --panel-raised:#16232b; --panel-soft:#0d171e; --line:#2a3942; --line-strong:#40515a; --text:#e1e8eb; --muted:#96a6ad; --faint:#657780; --cyan:#55c9c8; --blue:#8bb7d7; --green:#82c995; --amber:#e2b866; --red:#ed7168; --shadow:none; }
+      body { background:var(--bg); color:var(--text); font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+      .shell { width:min(1480px,calc(100% - 36px)); padding:14px 0 28px; }
+      .topbar { margin-bottom:14px; padding:9px 11px; border:1px solid var(--line); border-radius:4px; background:var(--panel); box-shadow:none; }
+      .mark { width:31px; height:31px; border:1px solid var(--line-strong); border-radius:3px; color:var(--cyan); background:var(--panel-raised); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; font-weight:700; box-shadow:none; }
+      .brand { gap:10px; }
+      .brand strong { font-size:13px; letter-spacing:.14em; }
+      .brand span { margin-top:1px; color:var(--muted); font-size:10px; letter-spacing:.04em; }
+      .top-status { gap:9px; color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px; letter-spacing:.04em; }
+      .top-status .dot { width:7px; height:7px; border-radius:1px; box-shadow:none; }
+      .connection-state { border-left-color:var(--line); }
+      .operator-actions { gap:10px; }
+      .stop-control { border-radius:3px; padding:7px 10px; color:#ffd9d5; background:#351d20; font-size:10px; letter-spacing:.07em; }
+      .stop-control:hover { background:#542326; }
+      .console-heading { display:flex; align-items:end; justify-content:space-between; gap:16px; margin:0 0 12px; padding:0 2px 10px; border-bottom:1px solid var(--line); }
+      .console-heading h1 { margin:3px 0 0; font-size:20px; line-height:1.1; letter-spacing:.01em; font-weight:600; }
+      .heading-meta { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:14px; color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; letter-spacing:.06em; text-transform:uppercase; }
+      .heading-meta b { color:var(--text); font-weight:600; }
+      .eyebrow { color:var(--faint); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; font-weight:600; letter-spacing:.1em; }
+      .layout { grid-template-columns:minmax(0,1.55fr) minmax(390px,.95fr); gap:12px; }
+      .panel { border-radius:4px; border-color:var(--line); background:var(--panel); box-shadow:none; }
+      .stage-panel,.command-panel,.plan-panel,.interpretation-panel,.lanes-panel,.events-panel,.runtime-panel,.telemetry-panel { padding:13px; }
+      .panel-head { margin-bottom:10px; }
+      .stage-title { font-size:16px; letter-spacing:0; font-weight:600; }
+      .status-pill { border-radius:3px; padding:4px 7px; background:var(--panel-soft); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; letter-spacing:.06em; }
+      .status-pill.running { background:#102b2d; }
+      .status-pill.paused,.status-pill.attention,.status-pill.stopped { background:#302919; }
+      .status-pill.blocked,.status-pill.collision { background:#351d20; }
+      .scene { height:min(66vh,680px); min-height:520px; border-radius:3px; border-color:var(--line-strong); background:#0b151c; box-shadow:none; }
+      .scene.running,.scene.collision { box-shadow:none; }
+      .scene:after { content:"CAMERA 01 / AXIS GRID"; right:10px; bottom:9px; color:#78909a; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; }
+      .camera-badge,.phase-badge { border-radius:2px; padding:4px 6px; color:#b7c9ce; background:#0d171e; border-color:var(--line-strong); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; }
+      .scene-tools button,.orbit-control { border-radius:2px; }
+      .scene-tools button { border-color:var(--line-strong); background:#0d171e; color:#b7c9ce; }
+      .scene-tools button:hover { border-color:var(--cyan); background:#12262a; }
+      .orbit-control { color:#879aa2; }
+      .physics-hud { border-radius:2px; border-color:var(--line-strong); background:#0d171e; color:#9dafb6; box-shadow:none; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+      .physics-hud b { color:var(--text); }
+      .scene-legend { gap:13px; padding-top:8px; color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; text-transform:uppercase; }
+      .legend-key { border-radius:1px; }
+      .right-col { gap:10px; }
+      .command-panel h2,.plan-panel h2,.interpretation-panel h2,.lanes-panel h2,.events-panel h2,.runtime-panel h2,.telemetry-panel h2 { margin:3px 0 10px; font-size:14px; letter-spacing:.01em; font-weight:600; }
+      .command-form { grid-template-columns:1fr auto auto; gap:6px; }
+      .command-input { border-radius:3px; border-color:var(--line-strong); background:#0b141b; padding:9px 10px; font-size:12px; }
+      .command-input:focus { border-color:var(--cyan); box-shadow:none; }
+      .primary,.secondary { border-radius:3px; padding:8px 10px; font-size:10px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; }
+      .primary { border-color:#63cfcf; color:#071416; background:var(--cyan); }
+      .primary:hover { filter:none; background:#71d8d7; }
+      .secondary { border-color:var(--line-strong); color:#bdcbd0; background:#16232b; }
+      .secondary:hover { color:var(--text); border-color:var(--cyan); background:#1b3037; }
+      .mic-button { min-width:38px; color:var(--cyan); }
+      .mic-button.listening { box-shadow:none; }
+      .voice-status { margin-top:8px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; }
+      .voice-meter { border-radius:1px; }
+      .voice-meter i { border-radius:0; }
+      .quick { gap:5px; margin-top:8px; }
+      .quick button { padding:6px 7px; font-size:9px; }
+      .transcript { margin-top:11px; padding-top:10px; }
+      .transcript-text { min-height:32px; margin-top:5px; font-size:11px; color:#c8d5d9; }
+      .source-label { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; }
+      .execution-meta { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+      .action { padding:10px 0; }
+      .action-name { font-weight:600; }
+      .action-status,.lane-phase { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; }
+      .progress { height:3px; border-radius:0; background:#203038; }
+      .progress i { border-radius:0; background:var(--cyan); }
+      .interpretation-grid { gap:6px; }
+      .data-cell,.lane,.telemetry-item,.metric { border-radius:3px; border-color:var(--line); background:var(--panel-soft); }
+      .data-cell { padding:7px; }
+      .data-cell span { font-size:10px; }
+      .preflight { gap:4px; margin-top:9px; padding-top:8px; }
+      .preflight-item { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; }
+      .preflight-item i { border-radius:2px; }
+      .lane { padding:8px; }
+      .lane-name,.lane-meta { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+      .lane-name { font-size:10px; }
+      .lane-meta { font-size:9px; }
+      .bottom-grid { gap:10px; margin-top:12px; }
+      .timeline-filter { gap:4px; margin:-2px 0 8px; }
+      .timeline-filter button { border-radius:2px; padding:4px 6px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; text-transform:uppercase; }
+      .timeline-filter button.active { background:#12282b; }
+      .event { padding-top:7px; }
+      .event-time,.event-kind,.runtime-detail { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; }
+      .event-kind { color:var(--muted); }
+      .event-message,.runtime-name { font-size:10px; }
+      .runtime-badge { border-radius:2px; padding:3px 5px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; }
+      .telemetry-grid { gap:6px; }
+      .telemetry-item { padding:7px; }
+      .telemetry-item b { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+      .telemetry-item small,.metric-label { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; }
+      .metrics { gap:6px; margin-top:10px; }
+      .metric { padding:8px 9px; }
+      .metric-value { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:16px; }
+      @media (max-width:900px) { .console-heading { display:block; } .heading-meta { justify-content:flex-start; margin-top:8px; } }
+      @media (max-width:560px) { .shell { width:calc(100% - 20px); } .layout { grid-template-columns:1fr; } .scene { height:430px; min-height:0; } }
+      /* Desaturated operator palette: steel is the default; color is reserved for safety state. */
+      :root { --cyan:#aebbc0; --blue:#8597a0; --green:#9ab39f; --amber:#c4a66f; --red:#bd716b; }
+      .top-status .dot { background:var(--green); }
+      .status-pill.running { color:#d1dcdf; border-color:#596970; background:#1a2429; }
+      .status-pill.complete { color:var(--green); border-color:#526d5b; background:#18241d; }
+      .status-pill.paused,.status-pill.attention,.status-pill.stopped { color:var(--amber); border-color:#6b5a3b; background:#282319; }
+      .status-pill.blocked,.status-pill.collision { color:var(--red); border-color:#704440; background:#2a1e1e; }
+      .primary { border-color:#bdc7c9; color:#111719; background:#aebbc0; }
+      .primary:hover { background:#c5ced0; }
+      .mic-button,.mic-button.listening { color:#c1cccf; border-color:#64747a; background:#18242a; box-shadow:none; }
+      .voice-meter i,.progress i { background:#9eacb1; }
+      .secondary:hover,.scene-tools button:hover { border-color:#8b9ba0; background:#202b31; }
+      .action-status,.lane-phase,.physics-hud b,.timeline-filter button.active { color:#c4d0d3; }
+      .timeline-filter button.active { border-color:#6a7b82; background:#1a2429; }
+      .scene-tools button:hover { color:#d5dfe1; }
+      /* Light minimal console: white space first, with a restrained steel-blue accent. */
+      :root { --bg:#f4f7f8; --panel:#ffffff; --panel-raised:#f8fafb; --panel-soft:#f1f5f6; --line:#d9e2e6; --line-strong:#b9c9d0; --text:#17252d; --muted:#6d7c84; --faint:#89979d; --cyan:#3f789e; --blue:#3f789e; --green:#347b55; --amber:#9a7029; --red:#b6524b; --shadow:0 1px 3px rgba(24,45,55,.06); }
+      body { background:var(--bg); color:var(--text); }
+      .topbar { background:#fff; border-color:var(--line); box-shadow:var(--shadow); }
+      .mark { color:#356f92; background:#f3f7f8; border-color:#9fb6c1; }
+      .brand strong { color:#1a2b34; }
+      .brand span,.top-status,.connection-state { color:var(--muted); }
+      .top-status .dot { background:var(--green); }
+      .stop-control { color:#994b46; background:#fff7f6; border-color:#d59b97; }
+      .stop-control:hover { color:#863b36; background:#ffefed; border-color:#c77b75; }
+      .console-heading { border-bottom-color:var(--line); }
+      .heading-meta { color:var(--muted); }
+      .heading-meta b { color:#334852; }
+      .eyebrow { color:#7c8c93; }
+      .panel { background:#fff; border-color:var(--line); box-shadow:var(--shadow); }
+      .stage-title,.command-panel h2,.plan-panel h2,.interpretation-panel h2,.lanes-panel h2,.events-panel h2,.runtime-panel h2,.telemetry-panel h2 { color:#1c2c34; }
+      .status-pill { color:#55717e; background:#f5f8f9; border-color:#c7d5da; }
+      .status-pill.running { color:#316c91; border-color:#9dbccc; background:#eef5f8; }
+      .status-pill.complete { color:var(--green); border-color:#a5c5b0; background:#f0f7f2; }
+      .status-pill.paused,.status-pill.attention,.status-pill.stopped { color:var(--amber); border-color:#d3bd91; background:#fbf7ee; }
+      .status-pill.blocked,.status-pill.collision { color:var(--red); border-color:#d4a09c; background:#fff5f4; }
+      .scene { border-color:#c3d1d6; background:#edf3f5; }
+      .camera-badge,.phase-badge { color:#506a76; background:rgba(255,255,255,.92); border-color:#c1d1d7; }
+      .scene-tools button,.orbit-control { color:#5f737c; }
+      .scene-tools button { background:rgba(255,255,255,.92); border-color:#bccbd1; }
+      .scene-tools button:hover { color:#315f7b; border-color:#7ca5bc; background:#f5f9fa; }
+      .physics-hud { color:#687a82; background:rgba(255,255,255,.92); border-color:#c1d1d7; }
+      .physics-hud b { color:#3d667d; }
+      .scene-legend { color:#718189; }
+      .command-input { color:var(--text); background:#fff; border-color:#b9c9d0; }
+      .command-input:focus { border-color:#6c9bb5; }
+      .primary { color:#fff; background:#3f789e; border-color:#3f789e; }
+      .primary:hover { color:#fff; background:#356b8e; }
+      .secondary { color:#4c6671; background:#fff; border-color:#b9c9d0; }
+      .secondary:hover { color:#285875; border-color:#7ca5bc; background:#f4f8fa; }
+      .mic-button,.mic-button.listening { color:#3f789e; border-color:#8fb0bf; background:#f7fafb; }
+      .voice-status,.source-label,.execution-meta { color:#73838a; }
+      .voice-meter { background:#e1e9ec; }
+      .voice-meter i,.progress i { background:#4a83a6; }
+      .transcript-text { color:#324650; }
+      .data-cell,.lane,.telemetry-item,.metric { background:#f8fafb; border-color:#d5e0e4; }
+      .data-cell label,.telemetry-item label,.telemetry-item small,.metric-label { color:#7d8d94; }
+      .data-cell span,.runtime-name { color:#30454f; }
+      .preflight-item { color:#65767d; }
+      .preflight-item.ok { color:#334952; }
+      .lane-name,.lane-meta { color:#405661; }
+      .action-route,.event-message { color:#667880; }
+      .action-status,.lane-phase,.physics-hud b,.timeline-filter button.active { color:#3f789e; }
+      .timeline-filter button { color:#718189; border-color:#c3d1d6; }
+      .timeline-filter button.active { border-color:#8fb0bf; background:#eef5f8; }
+      .event-kind { color:#5e7f91; }
+      .runtime-row,.action { border-top-color:#e0e7e9; }
+      .runtime-badge { color:var(--amber); border-color:#d3bd91; }
+      .runtime-badge.ready { color:var(--green); border-color:#a5c5b0; }
+      .metric-value,.telemetry-item b { color:#21363f; }
+      /* Spacious desktop layout: widen the canvas and let each control breathe. */
+      .shell { width:min(1760px,calc(100% - 28px)); padding:24px 0 46px; }
+      .topbar { margin-bottom:22px; padding:14px 17px; }
+      .console-heading { margin-bottom:20px; padding:0 5px 16px; }
+      .console-heading h1 { font-size:23px; }
+      .heading-meta { gap:20px; }
+      .layout { grid-template-columns:minmax(0,1.58fr) minmax(440px,.92fr); gap:20px; }
+      .right-col { gap:16px; }
+      .stage-panel,.command-panel,.plan-panel,.interpretation-panel,.lanes-panel,.events-panel,.runtime-panel,.telemetry-panel { padding:20px; }
+      .panel-head { margin-bottom:14px; }
+      .stage-title { font-size:18px; }
+      .scene { height:min(70vh,760px); min-height:620px; }
+      .scene-legend { gap:18px; padding-top:13px; }
+      .metrics { grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:16px; }
+      .metric { min-height:78px; padding:14px 15px; }
+      .metric-value { margin-top:9px; font-size:19px; }
+      .command-panel h2,.plan-panel h2,.interpretation-panel h2,.lanes-panel h2,.events-panel h2,.runtime-panel h2,.telemetry-panel h2 { font-size:16px; margin-bottom:14px; }
+      .command-form { gap:8px; }
+      .command-input { padding:12px 13px; }
+      .primary,.secondary { padding:10px 13px; }
+      .quick { gap:7px; margin-top:12px; }
+      .quick button { padding:7px 9px; }
+      .transcript { margin-top:17px; padding-top:14px; }
+      .transcript-text { min-height:42px; margin-top:8px; font-size:12px; }
+      .interpretation-grid { gap:10px; }
+      .data-cell { min-height:60px; padding:11px; }
+      .data-cell span { margin-top:5px; font-size:11px; }
+      .preflight { gap:6px; margin-top:14px; padding-top:12px; }
+      .preflight-item { font-size:10px; }
+      .lane-list { gap:10px; }
+      .lane { padding:11px; }
+      .bottom-grid { gap:18px; margin-top:20px; }
+      .events,.runtime { max-height:330px; }
+      .telemetry-grid { gap:10px; }
+      .telemetry-item { min-height:66px; padding:10px; }
+      @media (max-width:1200px) { .layout { grid-template-columns:minmax(0,1.35fr) minmax(420px,1fr); } }
+      @media (max-width:900px) { .shell { width:calc(100% - 28px); } .scene { height:600px; min-height:0; } .metrics { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+      @media (max-width:560px) { .shell { width:calc(100% - 20px); padding-top:14px; } .scene { height:440px; } .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+      .execution-grid { display:grid; grid-template-columns:minmax(0,1.18fr) minmax(0,1fr); gap:20px; margin-top:20px; }
+      .execution-grid .plan-panel,.execution-grid .lanes-panel { min-height:188px; }
+      .execution-grid .action { padding:13px 0; }
+      .execution-grid .lane-list { grid-template-columns:1fr 1fr; }
+      @media (max-width:900px) { .execution-grid { grid-template-columns:1fr; } .execution-grid .lane-list { grid-template-columns:1fr 1fr; } }
+      @media (max-width:560px) { .execution-grid { gap:12px; margin-top:14px; } .execution-grid .lane-list { grid-template-columns:1fr; } }
     </style>
   </head>
   <body>
     <main class="shell">
-      <header class="topbar">
-        <div class="brand"><div class="mark">◈</div><div><strong>VOXHANDS</strong><span>dual-arm edge control lab</span></div></div>
-        <div class="top-status"><i class="dot"></i><span id="topStatus">SIMULATOR ONLINE</span></div>
-      </header>
-
-      <section class="hero">
-        <div><div class="eyebrow">Physical AI / tabletop 01</div><h1>Give both hands<br />a job.</h1></div>
-        <p>Speak a task. VoxHands turns it into a constrained plan, checks the camera scene, and coordinates two simulated arms.</p>
-      </section>
-
+      <header class="topbar"><div class="brand"><div class="mark">VH</div><div><strong>VOXHANDS</strong><span>workcell control / operator console</span></div></div><div class="top-status"><i class="dot"></i><span id="topStatus">READY · SIMULATOR</span><span id="connectionState" class="connection-state">HTTP / BROWSER PHYSICS</span></div><div class="operator-actions"><span id="cellHealth" class="eyebrow">CELL 01 · SAFE</span><button id="stopAll" class="stop-control" type="button">■ STOP ALL MOTION</button></div></header>
+      <section class="console-heading"><div><div class="eyebrow">WORKCELL 01 / DUAL-ARM CONTROL</div><h1>Operator console</h1></div><div class="heading-meta"><span>MODE <b>SIMULATOR</b></span><span>INTERLOCKS <b>ENABLED</b></span><span>DATA <b>HTTP / 100 MS</b></span></div></section>
       <section class="layout">
         <div>
-          <article class="panel stage-panel">
-            <div class="panel-head"><div><div class="eyebrow">Live camera view</div><div class="stage-title">Table-setting workspace</div></div><div id="statusPill" class="status-pill">IDLE</div></div>
-            <div id="scene" class="scene"><div class="arm-label left">left arm</div><div class="arm-label right">right arm</div><div id="leftArm" class="arm left"></div><div id="rightArm" class="arm right"></div></div>
-            <div class="scene-legend"><span class="legend-item"><i class="legend-key" style="background:#62a6ff"></i>object</span><span class="legend-item"><i class="legend-key" style="border:1px dashed #66e1dc"></i>target</span><span class="legend-item"><i class="legend-key" style="background:#ff766f"></i>no-go zone</span></div>
+          <article class="panel stage-panel"><div class="panel-head"><div><div class="eyebrow">CELL 01 / CAMERA 01</div><div class="stage-title">Dual-arm tabletop cell</div><div id="cellSubstatus" class="source-label">SIMULATOR · SAFETY INTERLOCKS ENABLED</div></div><span id="statusPill" class="status-pill">READY</span></div>
+            <div id="scene" class="scene"><div id="webglMount"></div><div id="fallbackMount"><canvas id="fallbackCanvas" aria-label="Dependency-free 3D preview"></canvas></div><div class="scene-overlay"><span id="cameraBadge" class="camera-badge">CAMERA 01 · CALIBRATED</span><span id="phaseBadge" class="phase-badge">ARMS PARKED</span></div><div id="physicsHud" class="physics-hud"><b>RAPIER3D</b><br /><span id="physicsStatus">loading browser physics</span><br /><span id="contactCount">0 contacts · 0 collisions</span><br /><span id="motionRate">60 Hz trajectory</span> · <span id="renderRate">0 FPS render</span><br /><span id="gripStatus">grippers open</span> · <span id="targetStatus">target tracking</span><br /><span id="settleStatus">settled</span><br /><span id="motionWarning">motion stable</span></div><label class="orbit-control">orbit <input id="orbitRange" type="range" min="-55" max="55" value="-18" aria-label="Camera orbit" /></label><div class="scene-tools"><button id="cameraReset" type="button">Reset view</button><button data-view="top" type="button">Top</button><button data-view="operator" type="button">Operator</button></div></div>
+            <div class="scene-legend"><span class="legend-item"><i class="legend-key" style="background:#788990"></i>object</span><span class="legend-item"><i class="legend-key" style="border:1px dashed #4a83a6"></i>placement target</span><span class="legend-item"><i class="legend-key" style="background:#bd716b"></i>no-go barrier</span><span class="legend-item"><i class="legend-key" style="background:#4a83a6"></i>active manipulator</span></div>
           </article>
-          <section class="metrics"><div class="metric"><div class="metric-label">Plan latency</div><div class="metric-value" id="planLatency">42<span class="metric-unit">ms</span></div></div><div class="metric"><div class="metric-label">Last run</div><div class="metric-value" id="lastRun">—</div></div><div class="metric"><div class="metric-label">Sim rate</div><div class="metric-value" id="simFps">60<span class="metric-unit">fps</span></div></div><div class="metric"><div class="metric-label">Success rate</div><div class="metric-value" id="successRate">0<span class="metric-unit">%</span></div></div></section>
+          <section class="metrics"><div class="metric"><div class="metric-label">Plan latency</div><div class="metric-value" id="planLatency">42<span class="metric-unit">ms</span></div></div><div class="metric"><div class="metric-label">Last run</div><div class="metric-value" id="lastRun">—</div></div><div class="metric"><div class="metric-label">Sim rate</div><div class="metric-value" id="simFps">60<span class="metric-unit">fps</span></div></div><div class="metric"><div class="metric-label">Success rate</div><div class="metric-value" id="successRate">0<span class="metric-unit">%</span></div></div><div class="metric"><div class="metric-label">Collisions</div><div class="metric-value" id="collisionMetric">0</div></div><div class="metric"><div class="metric-label">Placement</div><div class="metric-value" id="placementMetric">—</div></div></section>
         </div>
-
         <div class="right-col">
-          <article class="panel command-panel"><div class="eyebrow">Voice command</div><h2>Tell the hands what to do</h2><form id="commandForm" class="command-form"><input id="commandInput" class="command-input" autocomplete="off" value="Set the table for two. Put the blue plate on the left and the cup on the right. Avoid the red zone." /><button class="primary" type="submit">Run task</button></form><div class="quick"><button class="secondary" data-command="Set the table for two. Put the blue plate on the left and the cup on the right.">Table for two</button><button class="secondary" data-command="Place the fork on the left and the spoon on the right. Avoid the red zone.">Cutlery pair</button><button id="resetButton" class="secondary" type="button">Reset scene</button></div><div class="transcript"><div class="eyebrow">Transcript / <span id="transcriptStatus">waiting</span></div><div id="transcriptText" class="transcript-text">Say something to begin.</div><div id="transcriptSource" class="source-label">source: demo transcript</div></div></article>
-          <article class="panel plan-panel"><div class="panel-head"><div><div class="eyebrow">Constrained action plan</div><div class="stage-title">What the system will do</div></div><span id="planState" class="status-pill">NO PLAN</span></div><div id="planMeta" class="plan-meta"></div><div id="planList"><div class="empty">Your validated plan will appear here.</div></div></article>
+          <article class="panel command-panel"><div class="eyebrow">COMMAND INPUT</div><h2>Enter task command</h2><form id="commandForm" class="command-form"><input id="commandInput" class="command-input" aria-label="Robot command" autocomplete="off" value="Set the table for two. Put the blue plate on the left and the cup on the right. Avoid the red zone." /><button id="micButton" class="secondary mic-button" type="button" aria-label="Start voice input">●</button><button id="submitCommand" class="primary" type="submit">Run</button></form><div class="voice-status"><span id="voiceSource">TEXT INPUT · MICROPHONE OPTIONAL</span><span class="voice-meter"><i id="voiceLevel"></i></span><span id="voiceConfidence">input —</span></div><div id="commandControls" class="command-controls is-hidden"><button id="pauseButton" class="secondary" type="button">Pause</button><button id="resumeButton" class="secondary is-hidden" type="button">Resume</button><button id="stopButton" class="stop-control" type="button">Stop</button></div><div class="quick"><button class="secondary" data-command="Set the table for two. Put the blue plate on the left and the cup on the right.">Run table set</button><button class="secondary" data-command="Home both arms.">Home arms</button><button class="secondary" data-command="Move the blue plate to the left target.">Move plate</button><button class="secondary" data-command="Show calibration status.">Calibration</button><button id="resetButton" class="secondary" type="button">Reset</button><button id="collisionButton" class="secondary physics-test" type="button">Test contact</button></div><div class="transcript"><div class="eyebrow">COMMAND / <span id="transcriptStatus">waiting</span></div><div id="transcriptText" class="transcript-text">Awaiting operator input.</div><div id="transcriptSource" class="source-label">source: typed input or browser microphone · planner authoritative</div></div></article>
+          <article class="panel interpretation-panel"><div class="panel-head"><div><div class="eyebrow">PLAN VALIDATION</div><h2>Validated request</h2></div><span id="confidenceBadge" class="status-pill">REQUEST —</span></div><div class="interpretation-grid"><div class="data-cell"><label>Intent</label><span id="intentValue">No request</span></div><div class="data-cell"><label>Objects</label><span id="objectsValue">—</span></div><div class="data-cell"><label>Destinations</label><span id="destinationsValue">—</span></div><div class="data-cell"><label>Constraints</label><span id="constraintsValue">—</span></div></div><div id="preflight" class="preflight"><div class="preflight-item"><i>•</i><span>Waiting for a structured plan</span></div></div></article>
         </div>
       </section>
-
-      <section class="bottom-grid"><article class="panel events-panel"><div class="eyebrow">Execution trace</div><h2>System events</h2><div id="events" class="events"></div></article><article class="panel runtime-panel"><div class="eyebrow">Runtime adapters</div><h2>Infrastructure status</h2><div id="runtime"></div></article></section>
+      <section class="execution-grid"><article class="panel plan-panel"><div class="panel-head"><div><div class="eyebrow">EXECUTION SEQUENCE</div><h2>Action sequence</h2></div><span id="planState" class="status-pill">NO PLAN</span></div><div id="planMeta" class="execution-meta"></div><div id="planList"><div class="empty">Validated actions will appear here.</div></div></article><article class="panel lanes-panel"><div class="panel-head"><div><div class="eyebrow">ARM CHANNELS</div><h2>Parallel channels</h2></div><span id="sharedCellStatus" class="source-label">CELL READY</span></div><div id="armLanes" class="lane-list"><div class="empty">Both arms parked and available.</div></div></article></section>
+      <section class="bottom-grid"><article class="panel events-panel"><div class="eyebrow">SAFETY TIMELINE</div><h2>Event log</h2><div id="eventFilters" class="timeline-filter"><button class="active" data-filter="all" type="button">All</button><button data-filter="info" type="button">Info</button><button data-filter="warning" type="button">Warning</button><button data-filter="safety" type="button">Safety</button><button data-filter="voice" type="button">Voice</button><button data-filter="motion" type="button">Motion</button></div><div id="events" class="events"></div></article><article class="panel runtime-panel"><div class="eyebrow">SYSTEM STATUS</div><h2>Runtime availability</h2><div id="runtime"></div></article><article class="panel telemetry-panel"><div class="eyebrow">SYSTEM TELEMETRY</div><h2>Motion and physics</h2><div class="telemetry-grid"><div class="telemetry-item"><label>Motion revision</label><b id="telemetryRevision">—</b><small>server trajectory</small></div><div class="telemetry-item"><label>Vision confidence</label><b id="telemetryVision">—</b><small>demo perception</small></div><div class="telemetry-item"><label>Grasp status</label><b id="telemetryGrasp">—</b><small>browser gripper state</small></div><div class="telemetry-item"><label>Placement accuracy</label><b id="telemetryPlacement">—</b><small>target-center tolerance</small></div><div class="telemetry-item"><label>Joint load</label><b id="telemetryLoad">SIM</b><small>hardware unavailable</small></div><div class="telemetry-item"><label>Motor temperature</label><b id="telemetryTemp">SIM</b><small>hardware unavailable</small></div></div></article></section>
     </main>
     <script>
-      const $ = (id) => document.getElementById(id);
-      const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-      const labelStatus = (value) => String(value || 'idle').replace('_', ' ').toUpperCase();
+      const $ = (id) => document.getElementById(id); const API_BASE = window.location.protocol === 'file:' ? 'http://127.0.0.1:8000' : ''; const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js'; const RAPIER_URL = 'https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.12.0/rapier.es.js';
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); const labelStatus = (value) => ({idle:'READY',offline_preview:'OFFLINE PREVIEW',running:'RUNNING',paused:'PAUSED',stopped:'STOPPED',blocked:'BLOCKED',complete:'COMPLETE'}[String(value||'idle')]||String(value||'idle').replace(/_/g,' ').toUpperCase());
+      const fallbackState = { status:'offline_preview', transcript:{text:'',status:'waiting',source:'offline preview'}, plan:null, objects:{blue_plate:{label:'Blue plate',color:'#62a6ff',x:.22,y:.69,z:.08,rotation:0,holder:null},cup:{label:'Cup',color:'#f5c86b',x:.72,y:.69,z:.12,rotation:0,holder:null},fork:{label:'Fork',color:'#dce7f5',x:.40,y:.77,z:.06,rotation:0,holder:null},spoon:{label:'Spoon',color:'#cad7e8',x:.58,y:.77,z:.06,rotation:0,holder:null}}, targets:{left_place:{label:'Left place',x:.35,y:.42},right_place:{label:'Right place',x:.65,y:.42},center_place:{label:'Center place',x:.50,y:.42}}, red_zone:{x:.44,y:.53,width:.12,height:.26}, arms:{left:{status:'parked',phase:'parked',x:.24,y:.16,z:.72,angle:-25,gripper:'open',holding:null},right:{status:'parked',phase:'parked',x:.76,y:.16,z:.72,angle:25,gripper:'open',holding:null}}, events:[], metrics:{plan_latency_ms:42,last_run_ms:null,sim_fps:60,success_rate:0}, physics:{engine:'rapier3d-browser',status:'loading',timestep_hz:60,contact_count:0,collision_count:0,last_contact:null}, runtime:{openvino:{name:'OpenVINO',available:false,devices:[]},speechmatics:{name:'Speechmatics',available:false},simulator:{name:'VoxHands simulator',available:true}} };
+      let latestState = fallbackState; let lastServerStatus = 'offline_preview'; let webglReady = false; let physicsReady = false; let collisionProbeActive = false; let eventFilter = 'all'; let speechRecognition = null; let motionFrames = {previous:fallbackState,current:fallbackState,previousAt:performance.now()-100,currentAt:performance.now()}; let sampledState = fallbackState; let interpolationLatencyMs = 70; let physicsStepCount = 0; let localPhysics = {contacts:0,collisions:0,lastContact:null,collisionPairs:new Set(),settlingCount:0,settleVelocity:0}; const motionDiagnostics = {hands:{},warning:''}; const visualState = {objects:{},arms:{}}; const smoothArmState = {};
+      const clamp01 = (value) => Math.max(0,Math.min(1,value)); const linear = (from,to,amount) => from + (to-from)*clamp01(amount);
+      function acceptMotionState(state) { const now=performance.now(); const incoming=Number(state.motion?.revision??0); const current=Number(motionFrames.current.motion?.revision??-1); if(incoming!==current||motionFrames.current===fallbackState){motionFrames={previous:motionFrames.current,current:state,previousAt:motionFrames.currentAt,currentAt:now};} else {motionFrames.current=state;motionFrames.currentAt=now;} }
+      function interpolateMotion(now) { const a=motionFrames.previous||motionFrames.current,b=motionFrames.current||latestState;if(!a||!b)return latestState;const span=Math.max(16,motionFrames.currentAt-motionFrames.previousAt);const amount=clamp01((now-interpolationLatencyMs-motionFrames.previousAt)/span);const state={...b,objects:{},arms:{}};Object.entries(b.objects||{}).forEach(([id,target])=>{const start=a.objects?.[id]||target;const object={...target,x:linear(Number(start.x??target.x),Number(target.x),amount),y:linear(Number(start.y??target.y),Number(target.y),amount),z:linear(Number(start.z??target.z??.08),Number(target.z??.08),amount),rotation:linear(Number(start.rotation??0),Number(target.rotation??0),amount)};object.pose={x:object.x,y:object.y,z:object.z};state.objects[id]=object;});Object.entries(b.arms||{}).forEach(([side,target])=>{const start=a.arms?.[side]||target;const arm={...target,x:linear(Number(start.x??target.x),Number(target.x),amount),y:linear(Number(start.y??target.y),Number(target.y),amount),z:linear(Number(start.z??target.z??.5),Number(target.z??.5),amount),angle:linear(Number(start.angle??0),Number(target.angle??0),amount)};arm.pose={x:arm.x,y:arm.y,z:arm.z,yaw:arm.angle};state.arms[side]=arm;});state.motion={...(b.motion||{}),interpolation_ms:Math.round(now-motionFrames.currentAt)};sampledState=state;return state;}
+      function renderPlan(plan) { $('planList').innerHTML=''; if (!plan) { $('planState').textContent='NO PLAN'; $('planState').className='status-pill'; $('planMeta').innerHTML=''; $('planList').innerHTML='<div class="empty">Your validated plan will appear here.</div>'; return; } const planClass=plan.status==='executing'?'running':plan.status==='blocked'?'blocked':plan.status==='paused'||plan.status==='stopped'?'attention':plan.status==='complete'?'complete':''; $('planState').textContent=labelStatus(plan.status); $('planState').className=`status-pill ${planClass}`; $('planMeta').innerHTML=`<span class="plan-id">${escapeHtml(plan.id)} · revision ${latestState.motion?.revision??'—'}</span><span>${plan.actions.length} action${plan.actions.length===1?'':'s'} · ${latestState.motion?.duration_ms??'—'} ms est.</span>`; if(plan.safety_issues.length){$('planList').innerHTML=`<div class="empty" style="color:var(--red)">${escapeHtml(plan.safety_issues.join(' '))}</div>`;return;} plan.actions.forEach((action)=>{const node=document.createElement('div');node.className='action';node.innerHTML=`<div class="action-top"><span class="action-name">${escapeHtml(action.object_label)}</span><span class="action-status ${action.status==='placed'?'placed':''}">${escapeHtml(action.status)}</span></div><div class="action-route"><span>${escapeHtml(action.arm)} arm</span><span>→ ${escapeHtml(action.target_label)}</span></div><div class="progress"><i style="width:${action.progress}%"></i></div>`;$('planList').appendChild(node);}); }
+      function renderInterpretation(state) { const plan=state.plan;const actions=plan?.actions||[];$('intentValue').textContent=plan?.intent?labelStatus(plan.intent):'No request';$('objectsValue').textContent=actions.length?actions.map((action)=>action.object_label).join(', '):'—';$('destinationsValue').textContent=actions.length?actions.map((action)=>action.target_label).join(', '):'—';$('constraintsValue').textContent=plan?.constraints?.length?plan.constraints.map((item)=>item.replaceAll('_',' ')).join(', '):'—';const validation=plan?plan.safety_issues?.length?'REVIEW':'VALID':'—';$('confidenceBadge').textContent=`VALIDATION ${validation}`;$('confidenceBadge').className=`status-pill ${validation==='VALID'?'complete':validation==='REVIEW'?'attention':''}`;const checks=plan?[['Workspace understood',true],['Objects detected',actions.length>0],['Grasp path available',actions.length>0],['Collision clearance verified',!(plan.safety_issues||[]).length],['Safety zone clear',!(plan.safety_issues||[]).some((issue)=>issue.includes('red'))],['Both arms available',true],['Tool and simulator ready',Boolean(state.runtime?.simulator?.available)]]:[['Waiting for a structured plan',false]];$('preflight').innerHTML=checks.map(([label,ok])=>`<div class="preflight-item ${ok?'ok':''}"><i>${ok?'✓':'•'}</i><span>${escapeHtml(label)}</span></div>`).join(''); }
+      function renderArmLanes(state) { const arms=state.arms||{};const actions=state.plan?.actions||[];const phase=state.motion?.phase||'parked';$('sharedCellStatus').textContent=state.status==='running'?'COORDINATED · LIVE':labelStatus(state.status);$('armLanes').innerHTML=Object.entries(arms).map(([side,arm])=>{const action=actions.find((item)=>item.arm===side);const object=action?.object_label||'No assignment';const target=action?.target_label||'Home';const progress=action?Math.min(100,Number(action.progress||0)):0;return `<div class="lane"><div class="lane-top"><span class="lane-name">${side.toUpperCase()} ARM · ${escapeHtml(object)}</span><span class="lane-phase">${escapeHtml(arm.phase||phase)}</span></div><div class="lane-meta"><span>${escapeHtml(target)} · ${arm.gripper==='closed'?'grip closed':'grip open'}</span><span>${arm.holding?`holding ${escapeHtml(arm.holding)}`:arm.phase==='parked'?'parked':'available'}</span></div><div class="progress"><i style="width:${progress}%"></i></div></div>`;}).join('')||'<div class="empty">Both arms parked and available.</div>'; }
+      function renderEvents(events) { const filtered=(events||[]).filter((event)=>eventFilter==='all'||event.kind===eventFilter||((eventFilter==='motion')&&['control','physics'].includes(event.kind))||((eventFilter==='warning')&&['warning','safety'].includes(event.kind))).slice().reverse();$('events').innerHTML=filtered.map((event)=>{const time=new Date(event.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});return `<div class="event"><div class="event-time">${escapeHtml(time)}</div><div><div class="event-kind">${escapeHtml(event.kind)}</div><div class="event-message">${escapeHtml(event.message)}</div></div></div>`;}).join('')||'<div class="empty">No matching events.</div>'; }
+      function renderRuntime(runtime) { const entries=[runtime.openvino,runtime.speechmatics,runtime.simulator]; $('runtime').innerHTML=entries.map((item)=>{const ready=item.available;const detail=item.name==='OpenVINO'?(ready?`${(item.devices||[]).join(', ')||'runtime detected'}`:'Install optional runtime for hardware inference'):item.name==='Speechmatics'?(ready?'Realtime credentials configured':'Demo transcript mode; API key optional'):'Server-side plan and browser physics';return `<div class="runtime-row"><div><div class="runtime-name">${escapeHtml(item.name)}</div><div class="runtime-detail">${escapeHtml(detail)}</div></div><span class="runtime-badge ${ready?'ready':''}">${ready?'READY':'DEMO'}</span></div>`;}).join(''); }
+      function renderPhysics(state) { const physics=state.physics||{};const objectGeometry=OBJECT_GEOMETRY||{};const contacts=Math.max(Number(physics.contact_count||0),localPhysics.contacts);const collisions=Math.max(Number(physics.collision_count||0),localPhysics.collisions);const motion=state.motion||{};const activeArms=Object.values(state.arms||{});const closedCount=activeArms.filter((arm)=>arm.gripper==='closed').length;const graspRecords=Object.entries(physicsBodies).filter(([id,record])=>objectGeometry[id]&&record);const held=graspRecords.filter(([,record])=>record.wasHeld).map(([id])=>id);const serverHeld=activeArms.filter((arm)=>arm.gripper==='closed').map((arm)=>arm.holding).filter(Boolean);const graspLocks=graspRecords.filter(([,record])=>record.graspMode==='contact'||record.graspMode==='contact_fallback').length;const graspBlocked=graspRecords.filter(([,record])=>record.graspBlocked).length;const graspModes=Object.fromEntries(graspRecords.filter(([,record])=>record.graspMode).map(([id,record])=>[id,record.graspMode]));const padContacts=Object.fromEntries(graspRecords.map(([id,record])=>[id,{left:Boolean(record.padContacts?.left),right:Boolean(record.padContacts?.right)}]));const graspDistancesMm=Object.fromEntries(graspRecords.filter(([,record])=>Number.isFinite(Number(record.graspDistance))).map(([id,record])=>[id,Number((record.graspDistance*1000).toFixed(2))]));const yawErrorsDeg=Object.fromEntries(graspRecords.filter(([,record])=>Number.isFinite(Number(record.yawErrorDeg))).map(([id,record])=>[id,Number(Number(record.yawErrorDeg).toFixed(2))]));const heldOffsetErrorsMm=Object.fromEntries(graspRecords.filter(([,record])=>record.wasHeld).map(([id,record])=>[id,Number(((record.heldOffsetError||0)*1000).toFixed(2))]));const graspAttempts=Object.fromEntries(graspRecords.map(([id,record])=>[id,record.graspAttemptSteps||0]));const releaseCount=graspRecords.reduce((total,[,record])=>total+(record.releaseCount||0),0);const dropLocks=Object.values(physicsBodies).filter((record)=>record.settleLocked).length;const settleSteps=Math.max(Number(physics.settle_steps||0),...Object.values(physicsBodies).map((record)=>record.settleSteps||0));const inSettlePhase=['releasing','settling'].includes(motion.phase);const settling=inSettlePhase?Object.values(state.objects||{}).filter((object)=>object.settled===false).length+Number(localPhysics.settlingCount||0):0;const targetLocked=Object.entries(state.objects||{}).some(([id,object])=>{const action=state.plan?.actions?.find((item)=>item.object_id===id);const target=action&&state.targets?.[action.target_id];const error=Math.hypot((Number(object.x)-Number(target?.x||object.x))*5,(Number(object.y)-Number(target?.y||object.y))*3.3);return Boolean((object.target_locked||(target&&error<=TARGET_TOLERANCE_M))&&action&&['placing','releasing','settling','returning','placed'].includes(action.status));});const alignmentPending=graspBlocked>0||activeArms.some((arm)=>arm.grasp_confirmed&&!held.includes(arm.holding));const fallbackActive=Object.values(graspModes).some((mode)=>mode==='contact_fallback');const fallbackHeld=held.some((id)=>graspModes[id]==='contact_fallback');const gripStatus=fallbackHeld?`CONTACT FALLBACK · ${held.join(', ')}`:held.length?`CONTACT · ${held.join(', ')}`:fallbackActive?'CONTACT FALLBACK':alignmentPending?'CONTACT PENDING':closedCount?`${closedCount} gripper${closedCount===1?'':'s'} closed`:'grippers open';const smoothStepMm=(motionDiagnostics.maxStepM||0)*1000;const warning=motionDiagnostics.warning||(smoothStepMm>MOTION_STEP_WARNING_M*1000?`smooth step ${smoothStepMm.toFixed(1)} mm`:'');$('physicsStatus').textContent=physicsReady?'60 Hz contact monitoring active':webglReady?'loading Rapier3D':'dependency-free preview';$('contactCount').textContent=`${contacts} contacts · ${collisions} collisions`;$('contactCount').className=collisions?'danger':'';$('motionRate').textContent=`${motion.sample_hz||60} Hz trajectory`;$('renderRate').textContent=`${Math.round(renderFrameCount)} FPS render`;$('gripStatus').textContent=gripStatus;$('targetStatus').textContent=targetLocked?'target lock ±1 cm':'target tracking';$('settleStatus').textContent=settling?`${settling} settling · ${localPhysics.settleVelocity.toFixed(2)} m/s`:motion.phase==='returning'?'returning · objects settled':'settled';$('motionWarning').textContent=warning||'motion stable';$('motionWarning').className=warning?'danger':'';$('physicsHud').querySelector('b').textContent=physicsReady?'RAPIER3D':webglReady?'RAPIER3D · LOADING':'CANVAS FALLBACK';window.__voxHandsDebug={renderFps:Math.round(renderFrameCount),physicsSteps:physicsStepCount,interpolationMs:Number(motion.interpolation_ms||0),contacts,collisions,held,serverHeld,closedCount,graspLocks,graspBlocked,graspModes,padContacts,graspDistancesMm,yawErrorsDeg,graspAttempts,heldOffsetErrorsMm,releaseCount,dropLocks,settling,settleSteps,settleVelocity:Math.max(localPhysics.settleVelocity,Number(physics.settle_velocity||0)),smoothnessMaxStepMm:smoothStepMm,targetLocked,targetToleranceM:TARGET_TOLERANCE_M,targetErrorsCm:Object.fromEntries(graspRecords.map(([id,record])=>[id,record.targetErrorCm||0])),motionWarning:warning||null}; }
+      function renderTelemetry(state) { const actions=state.plan?.actions||[];const accuracy=actions.length&&actions.every((action)=>['placed','returning','settling','releasing'].includes(action.status))?'≤ 1 cm':state.status==='complete'?'≤ 1 cm':'—';const held=Object.values(state.arms||{}).filter((arm)=>arm.holding).map((arm)=>arm.holding);$('telemetryRevision').textContent=state.motion?.revision??'—';$('telemetryVision').textContent=state.plan?'HIGH / DEMO':'—';$('telemetryGrasp').textContent=held.length?held.join(', '):Object.values(state.arms||{}).some((arm)=>arm.gripper==='closed')?'CLOSED':'OPEN';$('telemetryPlacement').textContent=accuracy;$('collisionMetric').textContent=Math.max(Number(state.physics?.collision_count||0),localPhysics.collisions);$('placementMetric').textContent=accuracy; }
+      function render(state) { acceptMotionState(state);latestState=state;lastServerStatus=state.status;const stateClass=state.status==='running'?'running':state.status==='blocked'||localPhysics.collisions?'blocked':state.status==='paused'||state.status==='stopped'?'attention':state.status==='complete'?'complete':'';$('topStatus').textContent=`${labelStatus(state.status)} · SIMULATOR`;$('statusPill').textContent=labelStatus(state.status);$('statusPill').className=`status-pill ${stateClass}`;$('cellHealth').textContent=localPhysics.collisions?'CELL 01 · COLLISION RISK':state.status==='complete'?'CELL 01 · VERIFIED':'CELL 01 · SAFE';$('connectionState').textContent=physicsReady?'HTTP / BROWSER PHYSICS':'SIMULATOR / FALLBACK';$('cameraBadge').textContent=webglReady?(state.status==='running'?'WEBGL WORKCELL / LIVE':'WEBGL WORKCELL'):'3D PREVIEW / FALLBACK';const phases=Object.values(state.arms||{}).map((arm)=>arm.phase).filter(Boolean);$('phaseBadge').textContent=phases.length&&phases.some((phase)=>phase!=='parked')?phases.join(' + '):'arms parked';$('transcriptText').textContent=state.transcript.text||'Say something to begin.';$('transcriptStatus').textContent=state.transcript.status;$('transcriptSource').textContent=`source: ${state.transcript.source}`;$('planLatency').innerHTML=`${state.metrics.plan_latency_ms}<span class="metric-unit">ms</span>`;$('lastRun').innerHTML=state.metrics.last_run_ms==null?'—':`${state.metrics.last_run_ms}<span class="metric-unit">ms</span>`;$('simFps').innerHTML=`${state.metrics.sim_fps}<span class="metric-unit">fps</span>`;$('successRate').innerHTML=`${state.metrics.success_rate}<span class="metric-unit">%</span>`;$('scene').classList.toggle('running',state.status==='running');$('scene').classList.toggle('collision',Boolean(localPhysics.collisions));$('commandControls').classList.toggle('is-hidden',!['running','paused'].includes(state.status));$('pauseButton').classList.toggle('is-hidden',state.status!=='running');$('resumeButton').classList.toggle('is-hidden',state.status!=='paused');$('submitCommand').disabled=['running','paused'].includes(state.status);renderPlan(state.plan);renderInterpretation(state);renderArmLanes(state);renderEvents(state.events);renderRuntime(state.runtime);renderPhysics(state);renderTelemetry(state); }
+      async function post(path,body) { const response=await fetch(`${API_BASE}${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const result=await response.json();if(path==='/api/reset'){latestState=result;acceptMotionState(result);}return result; } async function refresh() { try { const response=await fetch(`${API_BASE}/api/state`,{cache:'no-store'});if(!response.ok)throw new Error(`HTTP ${response.status}`);const state=await response.json();render(state); } catch (error) { console.warn('VoxHands live state refresh failed.',error);if(lastServerStatus!=='offline_preview'){latestState={...fallbackState,status:'offline_preview'};render(latestState);} $('topStatus').textContent='OFFLINE PREVIEW · START SERVER FOR LIVE CONTROL';$('connectionState').textContent=`LIVE STATE ERROR · ${String(error?.message||error).slice(0,48)}`; } }
 
-      async function post(path, body) {
-        const response = await fetch(path, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {}) });
-        return response.json();
+      const fallbackCanvas=$('fallbackCanvas');const fallbackCtx=fallbackCanvas.getContext('2d');let fallbackOrbit=-.31;let fallbackViewport={width:1,height:1};const fallbackProject=(p)=>{const c=Math.cos(fallbackOrbit),s=Math.sin(fallbackOrbit),x=p.x*c-p.z*s,z=p.x*s+p.z*c,scale=1/(1+z*.08);return{x:fallbackViewport.width/2+x*fallbackViewport.width*.29*scale,y:fallbackViewport.height*.7+z*fallbackViewport.height*.12*scale-p.y*fallbackViewport.height*.27*scale,depth:z};};const fallbackPoint=(pos,z=.08)=>({x:(pos.x-.5)*5,y:z*2.2,z:(pos.y-.5)*3.3});const fallbackPoly=(points,fill,stroke=null)=>{fallbackCtx.beginPath();points.forEach((p,i)=>i?fallbackCtx.lineTo(p.x,p.y):fallbackCtx.moveTo(p.x,p.y));fallbackCtx.closePath();if(fill){fallbackCtx.fillStyle=fill;fallbackCtx.fill();}if(stroke){fallbackCtx.strokeStyle=stroke;fallbackCtx.stroke();}};
+      function drawFallback(state) { const rect=fallbackCanvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;fallbackViewport={width:rect.width,height:rect.height};const w=Math.max(1,Math.round(rect.width*dpr)),h=Math.max(1,Math.round(rect.height*dpr));if(fallbackCanvas.width!==w||fallbackCanvas.height!==h){fallbackCanvas.width=w;fallbackCanvas.height=h;}fallbackCtx.clearRect(0,0,w,h);fallbackCtx.save();fallbackCtx.scale(dpr,dpr);const corners=[{x:-3.1,y:0,z:-2.1},{x:3.1,y:0,z:-2.1},{x:3.1,y:0,z:2.1},{x:-3.1,y:0,z:2.1}].map(fallbackProject);fallbackPoly(corners,'#173c43','#6aa7a1');for(let x=-2.8;x<3;x+=.42){const a=fallbackProject({x,y:.02,z:-1.9}),b=fallbackProject({x,y:.02,z:1.9});fallbackCtx.strokeStyle='rgba(140,222,215,.12)';fallbackCtx.beginPath();fallbackCtx.moveTo(a.x,a.y);fallbackCtx.lineTo(b.x,b.y);fallbackCtx.stroke();}for(let z=-1.8;z<2;z+=.42){const a=fallbackProject({x:-2.9,y:.025,z}),b=fallbackProject({x:2.9,y:.025,z});fallbackCtx.strokeStyle='rgba(140,222,215,.12)';fallbackCtx.beginPath();fallbackCtx.moveTo(a.x,a.y);fallbackCtx.lineTo(b.x,b.y);fallbackCtx.stroke();}const zone=state.red_zone;const zc=[fallbackPoint({x:zone.x,y:zone.y},.04),fallbackPoint({x:zone.x+zone.width,y:zone.y},.04),fallbackPoint({x:zone.x+zone.width,y:zone.y+zone.height},.04),fallbackPoint({x:zone.x,y:zone.y+zone.height},.04)].map(fallbackProject);fallbackPoly(zc,'rgba(255,100,98,.2)','rgba(255,128,120,.8)');fallbackCtx.fillStyle='#ffaaa0';fallbackCtx.font='700 10px ui-sans-serif';fallbackCtx.fillText('NO-GO BARRIER',zc[0].x,zc[0].y-5);Object.entries(state.targets||{}).forEach(([id,t])=>{const c=fallbackProject(fallbackPoint(t,.05));fallbackCtx.strokeStyle='rgba(102,225,220,.7)';fallbackCtx.setLineDash([5,4]);fallbackCtx.beginPath();fallbackCtx.ellipse(c.x,c.y,34,18,0,0,Math.PI*2);fallbackCtx.stroke();fallbackCtx.setLineDash([]);});Object.entries(state.objects||{}).forEach(([id,o])=>{const current=visualState.objects[id]||o;const p=fallbackProject(fallbackPoint(current,current.z||.08));fallbackCtx.fillStyle=o.color||'#dce7f5';if(id==='blue_plate'){fallbackCtx.beginPath();fallbackCtx.ellipse(p.x,p.y,28,15,0,0,Math.PI*2);fallbackCtx.fill();fallbackCtx.strokeStyle='#efffff';fallbackCtx.stroke();}else if(id==='cup'){fallbackCtx.fillRect(p.x-13,p.y-18,26,22);fallbackCtx.strokeStyle='#fff0bd';fallbackCtx.stroke();}else{fallbackCtx.strokeStyle=o.color;fallbackCtx.lineWidth=5;fallbackCtx.beginPath();fallbackCtx.moveTo(p.x-16,p.y);fallbackCtx.lineTo(p.x+16,p.y);fallbackCtx.stroke();}fallbackCtx.fillStyle='rgba(238,251,251,.75)';fallbackCtx.font='700 9px ui-sans-serif';fallbackCtx.fillText(o.label.toUpperCase(),p.x-24,p.y-24);});Object.entries(state.arms||{}).forEach(([side,a])=>{const sign=side==='left'?-1:1;const shoulder=fallbackProject({x:sign*2.8,y:2.7,z:1.4}),hand=fallbackProject(fallbackPoint({x:a.x,y:a.y},a.z||.5)),elbow={x:(shoulder.x+hand.x)/2+sign*24,y:(shoulder.y+hand.y)/2-20};fallbackCtx.strokeStyle='rgba(0,0,0,.3)';fallbackCtx.lineWidth=22;fallbackCtx.lineCap='round';fallbackCtx.beginPath();fallbackCtx.moveTo(shoulder.x+3,shoulder.y+5);fallbackCtx.lineTo(elbow.x+3,elbow.y+5);fallbackCtx.lineTo(hand.x+3,hand.y+5);fallbackCtx.stroke();fallbackCtx.strokeStyle=a.status!=='parked'?'#8cf0e7':'#a7d0d2';fallbackCtx.lineWidth=10;fallbackCtx.beginPath();fallbackCtx.moveTo(shoulder.x,shoulder.y);fallbackCtx.lineTo(elbow.x,elbow.y);fallbackCtx.lineTo(hand.x,hand.y);fallbackCtx.stroke();fallbackCtx.fillStyle='#d5f5f0';fallbackCtx.beginPath();fallbackCtx.arc(elbow.x,elbow.y,8,0,Math.PI*2);fallbackCtx.fill();fallbackCtx.fillStyle='#bff4ed';fallbackCtx.fillRect(hand.x-7,hand.y-4,14,4);});fallbackCtx.restore(); }
+      function animateFallback() { if(!webglReady){Object.entries(latestState.objects||{}).forEach(([id,o])=>{const c=visualState.objects[id]||{x:o.x,y:o.y,z:o.z};c.x+=(o.x-c.x)*.12;c.y+=(o.y-c.y)*.12;c.z+=(Number(o.z||.08)-Number(c.z||.08))*.12;visualState.objects[id]=c;});const smoothArms={};Object.entries(latestState.arms||{}).forEach(([side,a])=>{const c=visualState.arms[side]||{x:a.x,y:a.y,z:a.z};c.x+=(Number(a.x)-c.x)*.12;c.y+=(Number(a.y)-c.y)*.12;c.z+=(Number(a.z||.5)-c.z)*.12;visualState.arms[side]=c;smoothArms[side]={...a,x:c.x,y:c.y,z:c.z};});drawFallback({...latestState,arms:smoothArms});}requestAnimationFrame(animateFallback); }
+
+      let THREE=null,RAPIER=null,renderer=null,threeScene=null,camera=null,workcell=null,physicsWorld=null,physicsBodies={},threeObjects={},threeArms={},noGoCollider=null,lastPhysicsAt=performance.now(),physicsAccumulator=0,lastVisualStatus='',renderMeterAt=performance.now(),renderMeterFrames=0;let renderFrameCount=0;const TABLE_TOP=.38;const worldPos=(x,y,z=.08)=>({x:(x-.5)*5,z:(y-.5)*3.3,y:TABLE_TOP+z*2.1});const objectWorldPos=(id,x,y)=>{const p=worldPos(x,y,.08);const center={blue_plate:TABLE_TOP+.06,cup:TABLE_TOP+.20,fork:TABLE_TOP+.035,spoon:TABLE_TOP+.035}[id]??p.y;return{x:p.x,y:center,z:p.z};};const material=(color,roughness=.55,metalness=.25,opacity=1)=>new THREE.MeshStandardMaterial({color,roughness,metalness,transparent:opacity<1,opacity});const beam=(name,color)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(.18,1,.18),material(color,.38,.72));mesh.name=name;mesh.castShadow=true;return mesh;};const aimBeam=(mesh,a,b)=>{const av=new THREE.Vector3(a.x,a.y,a.z),bv=new THREE.Vector3(b.x,b.y,b.z),d=bv.clone().sub(av);mesh.position.copy(av.clone().add(bv).multiplyScalar(.5));mesh.scale.set(1,d.length(),1);mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize());};const addMesh=(parent,geometry,mat,position)=>{const mesh=new THREE.Mesh(geometry,mat);mesh.position.set(position.x||0,position.y||0,position.z||0);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;};
+      function createWorkcell() { threeScene=new THREE.Scene();threeScene.fog=new THREE.Fog(0x071721,8,17);camera=new THREE.PerspectiveCamera(38,1,.1,40);camera.position.set(5.7,5.2,6.8);camera.lookAt(0,.55,0);renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.25));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.1;renderer.domElement.setAttribute('aria-label','Three.js industrial dual-arm robot workcell');$('webglMount').appendChild(renderer.domElement);const hemi=new THREE.HemisphereLight(0xbbe8e8,0x08131b,1.55);threeScene.add(hemi);const key=new THREE.DirectionalLight(0xd8ffff,3.1);key.position.set(-4,8,5);key.castShadow=true;key.shadow.mapSize.set(1024,1024);key.shadow.camera.left=-6;key.shadow.camera.right=6;key.shadow.camera.top=6;key.shadow.camera.bottom=-5;threeScene.add(key);const rim=new THREE.PointLight(0x4de1dc,2.5,9);rim.position.set(3,2.8,-2);threeScene.add(rim);workcell=new THREE.Group();threeScene.add(workcell);const floor=addMesh(workcell,new THREE.BoxGeometry(11,.16,8),material(0x0a1a23,.82,.25),{x:0,y:-.18,z:0});floor.receiveShadow=true;addMesh(workcell,new THREE.BoxGeometry(6.5,.35,4.4),material(0x28545a,.38,.42),{x:0,y:.18,z:0});const edge=addMesh(workcell,new THREE.BoxGeometry(6.65,.08,4.55),material(0x70b6aa,.3,.8),{x:0,y:.37,z:0});edge.material.emissive=new THREE.Color(0x16424a);for(const x of [-2.7,2.7])for(const z of [-1.7,1.7])addMesh(workcell,new THREE.BoxGeometry(.25,1.65,.25),material(0x132b36,.48,.65),{x,y:-.65,z});const grid=new THREE.GridHelper(6.2,20,0x75cbc2,0x377277);grid.position.y=.37;grid.material.transparent=true;grid.material.opacity=.22;workcell.add(grid);const rail=addMesh(workcell,new THREE.BoxGeometry(6.9,.08,.12),material(0xff766f,.36,.4,.72),{x:0,y:.58,z:1.95});const zone=new THREE.Mesh(new THREE.BoxGeometry(.72,.42,.94),new THREE.MeshStandardMaterial({color:0xff514d,emissive:0x6c1714,emissiveIntensity:.5,transparent:true,opacity:.22}));const zp=worldPos(.50,.66,.12);zone.position.set(zp.x,.59,zp.z);zone.name='NO_GO_SAFETY_BARRIER';workcell.add(zone);const zoneEdges=new THREE.BoxHelper(zone,0xff766f);zoneEdges.material.transparent=true;zoneEdges.material.opacity=.82;workcell.add(zoneEdges);physicsWorld=new RAPIER.World({x:0,y:-9.81,z:0});const fixed=physicsWorld.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0,.18,0));physicsWorld.createCollider(RAPIER.ColliderDesc.cuboid(3.25,.18,2.2),fixed);const sensorBody=physicsWorld.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(zp.x,.78,zp.z));noGoCollider=physicsWorld.createCollider(RAPIER.ColliderDesc.cuboid(.36,.25,.47).setSensor(true),sensorBody);createPhysicsObjects();createArmPhysics();createThreeObjects();createThreeArms();resizeThree(); }
+      function colliderFor(id) { if(id==='blue_plate')return RAPIER.ColliderDesc.cylinder(.055,.58);if(id==='cup')return RAPIER.ColliderDesc.cylinder(.20,.27);return RAPIER.ColliderDesc.cuboid(.34,.035,.035); }
+      function createPhysicsObjects() { const objects=latestState.objects||fallbackState.objects;Object.entries(objects).forEach(([id,o])=>{const p=supportWorldPose(id,o.x,o.y);const body=physicsWorld.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(p.x,p.y,p.z));body.setLinearDamping(12);body.setAngularDamping(12);if(typeof body.lockRotations==='function')body.lockRotations(true,true);const collider=physicsWorld.createCollider(colliderFor(id),body);if(typeof body.sleep==='function')body.sleep();physicsBodies[id]={body,collider,wasHeld:false,released:false,settleLocked:false,settleSteps:0,releasePose:null,releasedRevision:null,commandPose:null,graspDistance:null,graspAligned:false,graspBlocked:false,graspMode:null,graspAttemptSteps:0,contactStableSteps:0,centerStableSteps:0,padContacts:{left:false,right:false},yawErrorDeg:null,graspYawAligned:false,heldOffsetError:0,releaseCount:0,attachmentOffset:graspProfile(id).attachmentOffset,targetErrorCm:0,authoritativeRunKey:null,authoritativePoseKey:null};}); }
+      function createArmPhysics() { for(const side of ['left','right']){const body=physicsWorld.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(side==='left'?-2.8:2.8,1.3,1.4));const collider=physicsWorld.createCollider(RAPIER.ColliderDesc.ball(.22).setSensor(true),body);physicsBodies[`hand_${side}`]={body,collider};for(const jaw of ['left','right']){const jawBody=physicsWorld.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(side==='left'?-2.8:2.8,1.3,1.4));const jawCollider=physicsWorld.createCollider(RAPIER.ColliderDesc.cuboid(GRIPPER_PAD_HALF_WIDTH,GRIPPER_PAD_HALF_HEIGHT,GRIPPER_PAD_HALF_DEPTH).setSensor(true),jawBody);physicsBodies[`jaw_${side}_${jaw}`]={body:jawBody,collider:jawCollider,side,jaw};}} }
+      function createThreeObjects() { Object.entries(fallbackState.objects).forEach(([id,o])=>{const group=new THREE.Group();group.name=`OBJECT_${id}`;const color=new THREE.Color(o.color);if(id==='blue_plate'){addMesh(group,new THREE.CylinderGeometry(.58,.66,.12,64),material(color,.25,.55),{x:0,y:0,z:0});addMesh(group,new THREE.TorusGeometry(.48,.035,12,48),material(0xbfe9ff,.22,.62),{x:0,y:.08,z:0});}else if(id==='cup'){addMesh(group,new THREE.CylinderGeometry(.27,.33,.46,48,true),material(color,.28,.25),{x:0,y:.03,z:0});addMesh(group,new THREE.TorusGeometry(.27,.035,12,40),material(0xffe5a4,.25,.22),{x:0,y:.26,z:0});const handle=new THREE.Mesh(new THREE.TorusGeometry(.18,.035,12,32,Math.PI),material(color,.3,.25));handle.rotation.z=Math.PI/2;handle.position.set(.28,.03,0);group.add(handle);}else{const shaft=addMesh(group,new THREE.BoxGeometry(.72,.055,.055),material(color,.25,.72),{x:0,y:.03,z:0});if(id==='fork'){for(let i=-1.5;i<=1.5;i++)addMesh(group,new THREE.BoxGeometry(.035,.12,.035),material(color,.25,.72),{x:.29+i*.07,y:.10,z:0});}else addMesh(group,new THREE.SphereGeometry(.12,20,10),material(color,.25,.72),{x:.29,y:.035,z:0});}group.traverse((m)=>{m.castShadow=true;m.receiveShadow=true;});workcell.add(group);threeObjects[id]=group;}); }
+      function targetMesh(target,id) { const p=worldPos(target.x,target.y,.025);const group=new THREE.Group();const ring=new THREE.Mesh(new THREE.TorusGeometry(.47,.018,10,48),new THREE.MeshStandardMaterial({color:0x66e1dc,emissive:0x1d6e70,emissiveIntensity:1.3,transparent:true,opacity:.8}));ring.rotation.x=-Math.PI/2;group.add(ring);const inner=new THREE.Mesh(new THREE.CylinderGeometry(.39,.39,.025,48),new THREE.MeshStandardMaterial({color:0x66e1dc,transparent:true,opacity:.06}));inner.position.y=.01;group.add(inner);group.position.set(p.x,TABLE_TOP+.02,p.z);workcell.add(group); }
+      function createThreeArms() { for(const side of ['left','right']){const sign=side==='left'?-1:1;const group=new THREE.Group();group.name=`ARM_${side}`;addMesh(group,new THREE.CylinderGeometry(.52,.62,.32,32),material(0x183e4d,.35,.78),{x:sign*2.82,y:.58,z:1.42});addMesh(group,new THREE.CylinderGeometry(.3,.3,.22,24),material(0x8cf0e7,.25,.78),{x:sign*2.82,y:.8,z:1.42});const upper=beam(`${side}_upper`,0x355c70),fore=beam(`${side}_forearm`,0x487f91);group.add(upper,fore);const elbow=addMesh(group,new THREE.SphereGeometry(.19,24,16),material(0xd5f5f0,.2,.75),{x:0,y:0,z:0});const wrist=addMesh(group,new THREE.SphereGeometry(.13,20,12),material(0x8cf0e7,.22,.7),{x:0,y:0,z:0});const tool=new THREE.Group();tool.name=`${side}_adaptive_parallel_jaw`;addMesh(tool,new THREE.CylinderGeometry(.15,.17,.14,24),material(0x253f4d,.28,.82),{x:0,y:.11,z:0});addMesh(tool,new THREE.BoxGeometry(.30,.13,.18),material(0x6d9aaa,.3,.72),{x:0,y:-.02,z:0});addMesh(tool,new THREE.BoxGeometry(.045,.05,.20),material(0xb6e8e2,.24,.76),{x:-.12,y:-.10,z:0});addMesh(tool,new THREE.BoxGeometry(.045,.05,.20),material(0xb6e8e2,.24,.76),{x:.12,y:-.10,z:0});const fingerMaterial=material(0xbee9e6,.24,.72);const padMaterial=material(0x344d57,.72,.18);const fingers=[-1,1].map((fingerSign)=>{const finger=new THREE.Group();finger.name=`${side}_jaw_${fingerSign<0?'inner':'outer'}`;addMesh(finger,new THREE.BoxGeometry(.075,.27,.13),fingerMaterial,{x:0,y:-.16,z:0});addMesh(finger,new THREE.BoxGeometry(.105,.075,.16),padMaterial,{x:0,y:-.30,z:0});tool.add(finger);finger.position.x=fingerSign*.18;return finger;});group.add(tool);group.userData={sign,upper,fore,elbow,wrist,tool,fingers,aperture:.18};workcell.add(group);threeArms[side]=group;}Object.entries(latestState.targets||{}).forEach(([id,t])=>targetMesh(t,id)); }
+      function armPose(side,a) { const sign=side==='left'?-1:1;const shoulder={x:sign*2.82,y:1.72,z:1.42};const h=worldPos(a.x,a.y,Math.max(Number(a.z||.5),.18));h.y=.52+Number(a.z||.5)*1.42;const hand={x:h.x,y:h.y,z:h.z};const elbow={x:(shoulder.x+hand.x)*.5+sign*.25,y:1.22,z:(shoulder.z+hand.z)*.5-.12};return{shoulder,elbow,hand}; }
+      function updateThreeArms(state=sampledState) { motionDiagnostics.warning='';const visualAlpha=1-Math.exp(-18/60);Object.entries(state.arms||{}).forEach(([side,a])=>{const g=threeArms[side];if(!g)return;const p=armPose(side,a),d=g.userData;const previous=motionDiagnostics.hands[side];if(previous){const delta=Math.hypot(p.hand.x-previous.x,p.hand.y-previous.y,p.hand.z-previous.z);if(delta>MOTION_STEP_WARNING_M)motionDiagnostics.warning=`${side} wrist target step ${delta.toFixed(2)} m`;if(a.holding&&delta>MOTION_STEP_WARNING_M)motionDiagnostics.warning=`${side} held-object target step ${delta.toFixed(2)} m`;}motionDiagnostics.hands[side]=p.hand;const smooth=smoothArmState[side]||{hand:{...p.hand},yaw:Number(a.pose?.yaw??a.angle??0)*.12};const before={...smooth.hand};smooth.hand.x+=(p.hand.x-smooth.hand.x)*visualAlpha;smooth.hand.y+=(p.hand.y-smooth.hand.y)*visualAlpha;smooth.hand.z+=(p.hand.z-smooth.hand.z)*visualAlpha;smooth.yaw+=(Number(a.pose?.yaw??a.angle??0)*.12-smooth.yaw)*visualAlpha;smoothArmState[side]=smooth;const visualStep=Math.hypot(smooth.hand.x-before.x,smooth.hand.y-before.y,smooth.hand.z-before.z);motionDiagnostics.maxStepM=Math.max(motionDiagnostics.maxStepM||0,visualStep);const visualElbow={x:(p.shoulder.x+smooth.hand.x)*.5+(side==='left'?-1:1)*.25,y:1.22,z:(p.shoulder.z+smooth.hand.z)*.5-.12};const visualHand=smooth.hand;aimBeam(d.upper,p.shoulder,visualElbow);aimBeam(d.fore,visualElbow,visualHand);d.elbow.position.set(visualElbow.x,visualElbow.y,visualElbow.z);d.wrist.position.set(visualHand.x,visualHand.y,visualHand.z);d.tool.position.set(visualHand.x,visualHand.y,visualHand.z);const profile=a.object_id&&OBJECT_GEOMETRY[a.object_id]?graspProfile(a.object_id):null;const targetAperture=a.gripper==='closed'?(profile?.closedAperture??.095):(profile?.openAperture??.20);d.aperture=THREE.MathUtils.lerp(d.aperture,targetAperture,.18);d.fingers.forEach((finger,index)=>{finger.position.x=(index?1:-1)*d.aperture;});d.tool.rotation.y=THREE.MathUtils.degToRad(smooth.yaw);}); }
+      function smoothPhysicsTranslation(record,desired) { const previous=record.commandPose||record.body.translation();const alpha=1-Math.exp(-18/60);const next={x:previous.x+(desired.x-previous.x)*alpha,y:previous.y+(desired.y-previous.y)*alpha,z:previous.z+(desired.z-previous.z)*alpha};record.commandPose=next;return next; }
+      function clearPhysicsRecord(record) { record.wasHeld=false;record.released=false;record.releasedRevision=null;record.settleLocked=false;record.settleSteps=0;record.releasePose=null;record.commandPose=null;record.graspDistance=null;record.graspAligned=false;record.graspBlocked=false;record.graspMode=null;record.graspAttemptSteps=0;record.contactStableSteps=0;record.centerStableSteps=0;record.padContacts={left:false,right:false};record.yawErrorDeg=null;record.graspYawAligned=false;record.heldOffsetError=0;record.releaseCount=0;record.targetErrorCm=0;record.authoritativeRunKey=null;record.authoritativePoseKey=null; }
+      function reconcileAuthoritativeObject(record,id,o,state,serverGrasp=false) { const runKey=`${state.plan?.id||'none'}|${state.status||'idle'}`;const poseKey=`${runKey}|${Number(o.x).toFixed(5)}|${Number(o.y).toFixed(5)}|${Number(o.z??.08).toFixed(5)}|${Number(o.rotation||0).toFixed(5)}`;if(record.wasHeld||record.settleLocked)return;const runChanged=record.authoritativeRunKey!==runKey;if(runChanged)clearPhysicsRecord(record);if(serverGrasp&&!runChanged)return;if(!runChanged&&poseKey===record.authoritativePoseKey)return;const pose=supportWorldPose(id,Number(o.x),Number(o.y));record.body.setBodyType(RAPIER.RigidBodyType.Dynamic,true);record.body.setTranslation(pose,true);record.body.setRotation(yawQuaternion(Number(o.rotation||0)),true);record.body.setLinvel({x:0,y:0,z:0},true);record.body.setAngvel({x:0,y:0,z:0},true);if(o.settled===false){if(typeof record.body.wakeUp==='function')record.body.wakeUp();}else if(typeof record.body.sleep==='function'){record.body.sleep();}record.commandPose=null;record.heldOffsetError=0;record.authoritativeRunKey=runKey;record.authoritativePoseKey=poseKey; }
+      function syncPhysicsState(state) {
+        updateThreeArms(state);
+        Object.entries(state.arms||{}).forEach(([side,a])=>{
+          const rawHand=armPose(side,a).hand;
+          const handRecord=physicsBodies[`hand_${side}`];
+          if(handRecord)handRecord.body.setNextKinematicTranslation(rawHand);
+          const visualHand=smoothArmState[side]?.hand||rawHand;
+          updateJawSensors(side,visualHand,a);
+        });
+        Object.entries(state.objects||{}).forEach(([id,o])=>{
+          const record=physicsBodies[id];
+          if(!record)return;
+          const action=state.plan?.actions?.find((item)=>item.object_id===id);
+          const holder=o.holder;
+          const arm=holder&&state.arms?.[holder];
+          const rawHand=arm?armPose(holder,arm).hand:null;
+          const visualHand=holder&&smoothArmState[holder]?.hand?smoothArmState[holder].hand:rawHand;
+          const serverGrasp=Boolean(arm&&arm.holding===id&&arm.grasp_confirmed&&['gripping','carrying','placing'].includes(action?.status));
+          reconcileAuthoritativeObject(record,id,o,state,serverGrasp);
+          const yawDegrees=holder?effectiveYaw(arm,holder):0;
+          const desiredPose=serverGrasp&&visualHand?heldWorldPose(visualHand,arm,id,yawDegrees):null;
+          const currentPosition=record.body.translation();
+          const graspDistance=desiredPose?Math.hypot(currentPosition.x-desiredPose.x,currentPosition.y-desiredPose.y,currentPosition.z-desiredPose.z):Infinity;
+          const aligned=Boolean(Number.isFinite(graspDistance)&&graspDistance<=GRASP_TOLERANCE_M);
+          const yawError=serverGrasp?angleErrorDegrees(yawDegrees,Number(o.rotation||0)):null;
+          const yawAligned=Boolean(serverGrasp&&yawError<=YAW_TOLERANCE_DEG);
+          const padContacts=record.padContacts||{left:false,right:false};
+          const contactConfirmed=Boolean(serverGrasp&&aligned&&yawAligned&&padContacts.left&&padContacts.right&&record.contactStableSteps>=CONTACT_STABLE_STEPS);
+          const fallbackConfirmed=Boolean(serverGrasp&&aligned&&yawAligned&&record.graspAttemptSteps>=CONTACT_RETRY_STEPS&&record.centerStableSteps>=CONTACT_STABLE_STEPS);
+          const canAttach=contactConfirmed||fallbackConfirmed;
+          const held=Boolean(serverGrasp&&((record.wasHeld)||canAttach));
+          record.graspDistance=Number.isFinite(graspDistance)?graspDistance:null;
+          record.graspAligned=Boolean(serverGrasp&&aligned&&yawAligned);
+          record.yawErrorDeg=yawError;
+          record.graspYawAligned=yawAligned;
+          record.graspBlocked=Boolean(serverGrasp&&!record.wasHeld&&!canAttach);
+          if(serverGrasp&&!record.wasHeld)record.graspMode=contactConfirmed?'contact':fallbackConfirmed?'contact_fallback':'contact_pending';
+          if(held){
+            if(!record.wasHeld){
+              record.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
+              record.released=false;
+              record.releasedRevision=null;
+              record.settleLocked=false;
+              record.settleSteps=0;
+              record.commandPose={x:currentPosition.x,y:currentPosition.y,z:currentPosition.z};
+              record.body.wakeUp();
+            }
+            const profile=graspProfile(id);
+            const pose=smoothPhysicsTranslation(record,desiredPose);
+            const yaw=yawDegrees;
+            record.attachmentOffset=profile.attachmentOffset;
+            record.heldOffsetError=Math.hypot(pose.x-desiredPose.x,pose.y-desiredPose.y,pose.z-desiredPose.z);
+            record.body.setNextKinematicTranslation(pose);
+            record.body.setNextKinematicRotation(yawQuaternion(yaw));
+            record.targetErrorCm=0;
+            record.wasHeld=true;
+            return;
+          }
+          const releasing=Boolean(record.wasHeld&&action&&['releasing','settling','returning','placed'].includes(action.status));
+          if(releasing&&!record.released){
+            const target=state.targets?.[action.target_id]||{x:o.x,y:o.y};
+            const pose=releaseWorldPose(id,target);
+            record.releasePose=pose;
+            record.releaseCount=(record.releaseCount||0)+1;
+            record.released=true;
+            record.releasedRevision=state.motion?.revision??null;
+            record.settleLocked=true;
+            record.settleSteps=SETTLE_STEPS;
+            record.commandPose=null;
+            record.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
+            record.body.setTranslation(pose.translation,true);
+            record.body.setRotation(pose.rotation,true);
+            record.body.setNextKinematicTranslation(pose.translation);
+            record.body.setNextKinematicRotation(pose.rotation);
+            record.body.setLinvel({x:0,y:0,z:0},true);
+            record.body.setAngvel({x:0,y:0,z:0},true);
+          }
+          if(record.settleLocked&&record.releasePose){
+            const pose=record.releasePose;
+            record.body.setNextKinematicTranslation(pose.translation);
+            record.body.setNextKinematicRotation(pose.rotation);
+            record.body.setLinvel({x:0,y:0,z:0},true);
+            record.body.setAngvel({x:0,y:0,z:0},true);
+            record.wasHeld=false;
+            return;
+          }
+          if(record.wasHeld){
+            record.body.setBodyType(RAPIER.RigidBodyType.Dynamic,true);
+            record.body.setLinvel({x:0,y:0,z:0},true);
+            record.body.setAngvel({x:0,y:0,z:0},true);
+            record.body.wakeUp();
+          }
+          record.commandPose=null;
+          record.heldOffsetError=0;
+          record.wasHeld=false;
+        });
       }
-
-      function renderScene(state) {
-        const scene = $('scene');
-        scene.classList.toggle('running', state.status === 'running');
-        const zone = state.red_zone;
-        let red = scene.querySelector('.red-zone');
-        if (!red) { red = document.createElement('div'); red.className = 'red-zone'; red.innerHTML = '<span>no-go</span>'; scene.appendChild(red); }
-        red.style.left = `${zone.x * 100}%`; red.style.top = `${zone.y * 100}%`; red.style.width = `${zone.width * 100}%`; red.style.height = `${zone.height * 100}%`;
-        Object.entries(state.targets || {}).forEach(([id, target]) => { let node = scene.querySelector(`[data-target-id="${id}"]`); if (!node) { node = document.createElement('div'); node.className = 'target'; node.dataset.targetId = id; node.innerHTML = `<span>${escapeHtml(target.label)}</span>`; scene.appendChild(node); } node.style.left = `${target.x * 100}%`; node.style.top = `${target.y * 100}%`; });
-        const actions = Object.fromEntries((state.plan?.actions || []).map((action) => [action.object_id, action]));
-        Object.entries(state.objects || {}).forEach(([id, object]) => { let node = scene.querySelector(`[data-object-id="${id}"]`); if (!node) { node = document.createElement('div'); node.className = 'object'; node.dataset.objectId = id; node.innerHTML = `<span>${escapeHtml(object.label)}</span>`; scene.appendChild(node); } node.style.left = `${object.x * 100}%`; node.style.top = `${object.y * 100}%`; node.style.background = object.color; node.classList.toggle('carrying', ['gripping', 'carrying', 'placing'].includes(actions[id]?.status)); });
-        ['left', 'right'].forEach((side) => { const arm = state.arms?.[side]; const node = $(`${side}Arm`); if (!arm || !node) return; node.style.left = `${arm.x * 100}%`; node.style.top = `${Math.max(0.06, arm.y) * 100}%`; node.style.transform = `translate(-50%, -6%) rotate(${arm.angle}deg)`; node.classList.toggle('moving', state.status === 'running'); });
+      function updatePhysics() { if(!physicsReady||!physicsWorld)return;const now=performance.now();const dt=Math.min((now-lastPhysicsAt)/1000,.1);lastPhysicsAt=now;physicsAccumulator=Math.min(physicsAccumulator+dt,.25);const state=interpolateMotion(now);while(physicsAccumulator>=1/60){syncPhysicsState(state);physicsWorld.timestep=1/60;physicsWorld.step();updateJawContacts(state);physicsAccumulator-=1/60;physicsStepCount+=1;Object.entries(physicsBodies).forEach(([id,record])=>{if(!record.settleLocked||!record.releasePose)return;record.settleSteps=Math.max(0,record.settleSteps-1);if(record.settleSteps===0){const pose=record.releasePose;record.body.setBodyType(RAPIER.RigidBodyType.Dynamic,true);record.body.setTranslation(pose.translation,true);record.body.setRotation(pose.rotation,true);record.body.setLinvel({x:0,y:0,z:0},true);record.body.setAngvel({x:0,y:0,z:0},true);if(typeof record.body.sleep==='function')record.body.sleep();record.settleLocked=false;}});}localPhysics.settlingCount=0;localPhysics.settleVelocity=0;Object.entries(physicsBodies).forEach(([id,record])=>{if(!['blue_plate','cup','fork','spoon'].includes(id))return;if(record.settleLocked){localPhysics.settlingCount+=1;return;}if(record.wasHeld)return;const velocity=record.body.linvel();const speed=Math.hypot(velocity.x,velocity.y,velocity.z);localPhysics.settleVelocity=Math.max(localPhysics.settleVelocity,speed);const action=state.plan?.actions?.find((item)=>item.object_id===id);const target=action&&state.targets?.[action.target_id];if(target){const targetWorld=worldPos(target.x,target.y,.08);const bodyPosition=record.body.translation();record.targetErrorCm=Math.hypot(bodyPosition.x-targetWorld.x,bodyPosition.z-targetWorld.z)*100;}if(state.motion?.phase==='settling'||(state.status==='complete'&&speed>.04)){if(speed>.04)localPhysics.settlingCount+=1;}});checkPhysicsContacts(state);Object.entries(threeObjects).forEach(([id,group])=>{const body=physicsBodies[id]?.body;if(!body)return;const p=body.translation(),r=body.rotation();group.position.set(p.x,p.y,p.z);group.quaternion.set(r.x,r.y,r.z,r.w);});if(now-browserTelemetryAt>250){browserTelemetryAt=now;const graspRecords=Object.values(physicsBodies).filter((record)=>record.graspMode);const graspRecord=graspRecords[0];const dropLock=Object.values(physicsBodies).some((record)=>record.settleLocked);post('/api/physics-event',{kind:'telemetry',grasp_lock:graspRecords.some((record)=>record.graspMode==='contact'||record.graspMode==='contact_fallback'),drop_lock:dropLock,settle_steps:Math.max(0,...Object.values(physicsBodies).map((record)=>record.settleSteps||0)),settle_velocity:localPhysics.settleVelocity,grasp_mode:graspRecord?.graspMode||null,left_pad_contact:Boolean(graspRecord?.padContacts?.left),right_pad_contact:Boolean(graspRecord?.padContacts?.right),grasp_distance_mm:graspRecord?.graspDistance==null?null:graspRecord.graspDistance*1000,grasp_attempts:graspRecord?.graspAttemptSteps||0,smoothness_max_step_mm:(motionDiagnostics.maxStepM||0)*1000}).catch(()=>{});}lastVisualStatus=state.status; }
+      function checkPhysicsContacts(state=sampledState) { if(!noGoCollider)return;Object.entries(physicsBodies).forEach(([id,record])=>{if(!id.startsWith('hand_')&&!['blue_plate','cup','fork','spoon'].includes(id))return;if(!collisionProbeActive&&!id.startsWith('hand_'))return;if(!collisionProbeActive&&state.status!=='running'&&!id.startsWith('hand_'))return;let hit=false;try{hit=physicsWorld.intersectionPair(noGoCollider,record.collider);}catch(_){hit=false;}if(hit){const pair=`${id.replace('_',' ')} × safety barrier`;const key=`${id}:barrier`;if(!localPhysics.collisionPairs.has(key)){localPhysics.collisionPairs.add(key);localPhysics.collisions+=1;localPhysics.contacts+=1;localPhysics.lastContact=pair;renderPhysics(latestState);post('/api/physics-event',{kind:'collision',pair,run_id:latestState.plan?.id||null}).catch(()=>{});}}}); }
+      function resetPhysicsBodies(state=latestState) {
+        if(!physicsReady)return;
+        physicsAccumulator=0;
+        browserTelemetryAt=0;
+        motionDiagnostics.hands={};
+        motionDiagnostics.warning='';
+        motionDiagnostics.maxStepM=0;
+        localPhysics.settleVelocity=0;
+        Object.keys(smoothArmState).forEach((side)=>delete smoothArmState[side]);
+        Object.entries(state.objects||fallbackState.objects).forEach(([id,o])=>{
+          const record=physicsBodies[id];
+          if(!record)return;
+          record.body.setBodyType(RAPIER.RigidBodyType.Dynamic,true);
+          const p=supportWorldPose(id,Number(o.x),Number(o.y));
+          record.body.setTranslation(p,true);
+          record.body.setRotation(yawQuaternion(Number(o.rotation||0)),true);
+          record.body.setLinvel({x:0,y:0,z:0},true);
+          record.body.setAngvel({x:0,y:0,z:0},true);
+          if(typeof record.body.wakeUp==='function')record.body.wakeUp();
+          if(typeof record.body.sleep==='function')record.body.sleep();
+          clearPhysicsRecord(record);
+          record.authoritativeRunKey=null;
+          record.authoritativePoseKey=null;
+        });
+        Object.entries(state.arms||fallbackState.arms).forEach(([side,a])=>{
+          const record=physicsBodies[`hand_${side}`];
+          if(!record)return;
+          record.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
+          const p=armPose(side,a).hand;
+          record.body.setTranslation(p,true);
+          record.body.setNextKinematicTranslation(p);
+          const visualHand=smoothArmState[side]?.hand||p;
+          updateJawSensors(side,visualHand,a);
+        });
       }
-
-      function renderPlan(plan) {
-        $('planList').innerHTML = '';
-        if (!plan) { $('planState').textContent = 'NO PLAN'; $('planState').className = 'status-pill'; $('planMeta').innerHTML = ''; $('planList').innerHTML = '<div class="empty">Your validated plan will appear here.</div>'; return; }
-        $('planState').textContent = labelStatus(plan.status); $('planState').className = `status-pill ${plan.status === 'executing' ? 'running' : plan.status === 'blocked' ? 'blocked' : ''}`;
-        $('planMeta').innerHTML = `<span class="plan-id">${escapeHtml(plan.id)} · ${escapeHtml(plan.intent)}</span><span class="plan-id">${plan.actions.length} action${plan.actions.length === 1 ? '' : 's'}</span>`;
-        if (plan.safety_issues.length) { $('planList').innerHTML = `<div class="empty" style="color:var(--red)">${escapeHtml(plan.safety_issues.join(' '))}</div>`; return; }
-        plan.actions.forEach((action) => { const node = document.createElement('div'); node.className = 'action'; node.innerHTML = `<div class="action-top"><span class="action-name">${escapeHtml(action.object_label)}</span><span class="action-status ${action.status === 'placed' ? 'placed' : ''}">${escapeHtml(action.status)}</span></div><div class="action-route"><span>${escapeHtml(action.arm)} arm</span><span>→ ${escapeHtml(action.target_label)}</span></div><div class="progress"><i style="width:${action.progress}%"></i></div>`; $('planList').appendChild(node); });
-      }
-
-      function renderEvents(events) {
-        $('events').innerHTML = (events || []).slice().reverse().map((event) => { const time = new Date(event.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}); return `<div class="event"><div class="event-time">${escapeHtml(time)}</div><div><div class="event-kind">${escapeHtml(event.kind)}</div><div class="event-message">${escapeHtml(event.message)}</div></div></div>`; }).join('') || '<div class="empty">No events yet.</div>';
-      }
-
-      function renderRuntime(runtime) {
-        const entries = [runtime.openvino, runtime.speechmatics, runtime.simulator];
-        $('runtime').innerHTML = entries.map((item) => { const ready = item.available; const detail = item.name === 'OpenVINO' ? (ready ? `${(item.devices || []).join(', ') || 'runtime detected'}` : 'Install optional runtime for hardware inference') : item.name === 'Speechmatics' ? (ready ? 'Realtime credentials configured' : 'Demo transcript mode; API key optional') : 'Server-side scene and arm control'; return `<div class="runtime-row"><div><div class="runtime-name">${escapeHtml(item.name)}</div><div class="runtime-detail">${escapeHtml(detail)}</div></div><span class="runtime-badge ${ready ? 'ready' : ''}">${ready ? 'READY' : 'DEMO'}</span></div>`; }).join('');
-      }
-
-      function render(state) {
-        $('topStatus').textContent = `${labelStatus(state.status)} · SIMULATOR`;
-        $('statusPill').textContent = labelStatus(state.status); $('statusPill').className = `status-pill ${state.status === 'running' ? 'running' : state.status === 'blocked' ? 'blocked' : ''}`;
-        $('transcriptText').textContent = state.transcript.text || 'Say something to begin.'; $('transcriptStatus').textContent = state.transcript.status; $('transcriptSource').textContent = `source: ${state.transcript.source}`;
-        $('planLatency').innerHTML = `${state.metrics.plan_latency_ms}<span class="metric-unit">ms</span>`; $('lastRun').innerHTML = state.metrics.last_run_ms == null ? '—' : `${state.metrics.last_run_ms}<span class="metric-unit">ms</span>`; $('simFps').innerHTML = `${state.metrics.sim_fps}<span class="metric-unit">fps</span>`; $('successRate').innerHTML = `${state.metrics.success_rate}<span class="metric-unit">%</span>`;
-        renderScene(state); renderPlan(state.plan); renderEvents(state.events); renderRuntime(state.runtime);
-      }
-
-      async function refresh() { try { render(await (await fetch('/api/state', {cache:'no-store'})).json()); } catch (_) { $('topStatus').textContent = 'SERVER OFFLINE'; } }
-      $('commandForm').addEventListener('submit', async (event) => { event.preventDefault(); const input = $('commandInput'); if (!input.value.trim()) return; await post('/api/command', {text: input.value.trim()}); await refresh(); });
-      document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', async () => { $('commandInput').value = button.dataset.command; await post('/api/command', {text: button.dataset.command}); await refresh(); }));
-      $('resetButton').addEventListener('click', async () => { await post('/api/reset'); await refresh(); });
-      refresh(); setInterval(refresh, 420);
+      function resizeThree() { if(!renderer)return;const rect=$('scene').getBoundingClientRect();renderer.setSize(rect.width,rect.height,false);camera.aspect=rect.width/Math.max(rect.height,1);camera.updateProjectionMatrix(); } function renderThree() { if(renderer&&threeScene){resizeThree();renderer.render(threeScene,camera);} } function animateThree() { requestAnimationFrame(animateThree);renderFrameCount+=1;renderMeterFrames+=1;const now=performance.now();if(now-renderMeterAt>=500){renderFrameCount=renderMeterFrames*1000/(now-renderMeterAt);renderMeterFrames=0;renderMeterAt=now;renderPhysics(sampledState);}if(webglReady){updatePhysics();renderThree();} }
+      function setCamera(mode) { if(!camera)return;const positions={top:[0,8,.15],operator:[5.7,4.1,6.8],front:[0,3.2,8.2]};const p=positions[mode]||positions.operator;camera.position.set(...p);camera.lookAt(0,.55,0);$('orbitRange').value=mode==='top'?0:-18; } function injectCollision() { if(!physicsReady||!physicsBodies.cup)return;collisionProbeActive=true;const p=worldPos(.50,.66,.22);physicsBodies.cup.body.setTranslation({x:p.x,y:.78,z:p.z},true);physicsBodies.cup.body.setLinvel({x:0,y:0,z:0},true);$('physicsStatus').textContent='test contact injected'; }
+      async function startWebGL() { try { const modules=await Promise.all([import(THREE_URL),import(RAPIER_URL)]);THREE=modules[0];RAPIER=modules[1];await RAPIER.init();createWorkcell();webglReady=true;physicsReady=true;$('fallbackMount').style.display='none';$('physicsStatus').textContent='60 Hz contact monitoring active';renderPhysics(latestState); } catch(error) { webglReady=false;physicsReady=false;$('fallbackMount').style.display='block';const fileHint=window.location.protocol==='file:';$('physicsStatus').textContent=fileHint?'Open http://127.0.0.1:8000/ for Three.js + Rapier3D':'fallback preview active';$('topStatus').textContent=fileHint?'OPEN HTTP FOR 3D · 127.0.0.1:8000':'FALLBACK · CANVAS PREVIEW';console.warn('VoxHands 3D runtime unavailable; using fallback preview.',error); } }
+      async function control(action) { try { await post('/api/control',{action}); await refresh(); } catch (_) { $('topStatus').textContent='ATTENTION REQUIRED · CONTROL UNAVAILABLE'; } }
+      function toggleListening() { const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Recognition){$('voiceSource').textContent='BROWSER MIC UNAVAILABLE · TYPE COMMAND';$('transcriptStatus').textContent='unavailable';return;}if(speechRecognition){speechRecognition.stop();speechRecognition=null;$('micButton').classList.remove('listening');$('voiceSource').textContent='VOICE INPUT READY';return;}speechRecognition=new Recognition();speechRecognition.continuous=false;speechRecognition.interimResults=true;speechRecognition.onstart=()=>{$('micButton').classList.add('listening');$('voiceSource').textContent='LISTENING · BROWSER MICROPHONE';$('transcriptStatus').textContent='listening';};speechRecognition.onresult=(event)=>{const text=Array.from(event.results).map((result)=>result[0].transcript).join('');$('commandInput').value=text;$('transcriptText').textContent=text;$('voiceConfidence').textContent='input live';};speechRecognition.onerror=()=>{$('voiceSource').textContent='VOICE INPUT ERROR · TYPE COMMAND';};speechRecognition.onend=()=>{$('micButton').classList.remove('listening');$('voiceSource').textContent='VOICE INPUT READY';$('transcriptStatus').textContent='final';speechRecognition=null;};speechRecognition.start(); }
+      $('orbitRange').addEventListener('input',(event)=>{if(!camera)return;const value=Number(event.target.value)*Math.PI/180;camera.position.x=6.8*Math.sin(value);camera.position.z=6.8*Math.cos(value);camera.lookAt(0,.55,0);});$('cameraReset').addEventListener('click',()=>setCamera('operator'));document.querySelectorAll('[data-view]').forEach((button)=>button.addEventListener('click',()=>setCamera(button.dataset.view)));$('collisionButton').addEventListener('click',injectCollision);$('stopAll').addEventListener('click',()=>control('stop'));$('stopButton').addEventListener('click',()=>control('stop'));$('pauseButton').addEventListener('click',()=>control('pause'));$('resumeButton').addEventListener('click',()=>control('resume'));$('micButton').addEventListener('click',toggleListening);document.querySelectorAll('[data-filter]').forEach((button)=>button.addEventListener('click',()=>{eventFilter=button.dataset.filter;document.querySelectorAll('[data-filter]').forEach((item)=>item.classList.toggle('active',item===button));renderEvents(latestState.events);}));$('commandForm').addEventListener('submit',async(event)=>{event.preventDefault();const input=$('commandInput');if(!input.value.trim()||['running','paused'].includes(latestState.status))return;await post('/api/command',{text:input.value.trim()});await refresh();});document.querySelectorAll('[data-command]').forEach((button)=>button.addEventListener('click',async()=>{$('commandInput').value=button.dataset.command;if(['running','paused'].includes(latestState.status))return;await post('/api/command',{text:button.dataset.command});await refresh();}));$('resetButton').addEventListener('click',async()=>{await post('/api/reset');collisionProbeActive=false;localPhysics={contacts:0,collisions:0,lastContact:null,collisionPairs:new Set(),settlingCount:0,settleVelocity:0};resetPhysicsBodies();await refresh();});window.addEventListener('resize',resizeThree);
+      render(fallbackState);animateFallback();animateThree();refresh();setInterval(refresh,100);startWebGL();
+      var TARGET_TOLERANCE_M=0.01,GRASP_TOLERANCE_M=0.006,YAW_TOLERANCE_DEG=3,CONTACT_STABLE_STEPS=4,CONTACT_RETRY_STEPS=15,SETTLE_STEPS=12,RELEASE_CLEARANCE_M=0.002,TABLE_PHYSICS_TOP=.36,GRIPPER_PAD_CENTER_Y=.30,GRIPPER_PAD_HALF_WIDTH=.0525,GRIPPER_PAD_HALF_HEIGHT=.0375,GRIPPER_PAD_HALF_DEPTH=.08,MOTION_STEP_WARNING_M=.08,OBJECT_GEOMETRY={blue_plate:{width:1.16,graspWidth:1.16,halfHeight:.055},cup:{width:.54,graspWidth:.54,halfHeight:.20},fork:{width:.72,graspWidth:.07,halfHeight:.035},spoon:{width:.72,graspWidth:.07,halfHeight:.035}},browserTelemetryAt=0;
+      function graspProfile(id) { const geometry=OBJECT_GEOMETRY[id]||{width:.3,graspWidth:.3,halfHeight:.05};const openAperture=geometry.graspWidth/2+GRIPPER_PAD_HALF_WIDTH+.008;const closedAperture=Math.max(GRIPPER_PAD_HALF_WIDTH+.006,geometry.graspWidth/2+GRIPPER_PAD_HALF_WIDTH-.002);return{...geometry,openAperture,closedAperture,jawAperture:closedAperture,attachmentOffset:{x:0,y:-GRIPPER_PAD_CENTER_Y,z:0},releaseHeight:TABLE_PHYSICS_TOP+geometry.halfHeight+RELEASE_CLEARANCE_M}; }
+      function effectiveYaw(arm,side) { return smoothArmState[side]?.yaw??Number(arm?.pose?.yaw??arm?.angle??0)*.12; }
+      function angleErrorDegrees(from,to) { return Math.abs((((Number(from)-Number(to)+180)%360)+360)%360-180); }
+      function supportWorldPose(id,x,y) { const horizontal=worldPos(x,y,.08),profile=graspProfile(id);return{x:horizontal.x,y:profile.releaseHeight,z:horizontal.z}; }
+      function rotateLocalOffset(offset,yawDegrees) { const yaw=THREE.MathUtils.degToRad(yawDegrees);const c=Math.cos(yaw),s=Math.sin(yaw);return{x:offset.x*c-offset.z*s,y:offset.y,z:offset.x*s+offset.z*c}; }
+      function heldWorldPose(hand,arm,id,yawDegrees=null) { const profile=graspProfile(id);const local=rotateLocalOffset(profile.attachmentOffset,yawDegrees==null?effectiveYaw(arm):yawDegrees);return{x:hand.x+local.x,y:hand.y+local.y,z:hand.z+local.z}; }
+      function releaseWorldPose(id,target) { const horizontal=worldPos(target.x,target.y,.08),profile=graspProfile(id);return{translation:{x:horizontal.x,y:profile.releaseHeight,z:horizontal.z},rotation:{x:0,y:0,z:0,w:1}}; }
+      function yawQuaternion(yawDegrees) { const yaw=THREE.MathUtils.degToRad(yawDegrees);return{x:0,y:Math.sin(yaw/2),z:0,w:Math.cos(yaw/2)}; }
+      function updateJawSensors(side,hand,arm) { const profile=graspProfile(arm.object_id);const d=threeArms[side]?.userData;const aperture=d?.aperture??(arm.gripper==='closed'?profile.closedAperture:profile.openAperture);const yawDegrees=effectiveYaw(arm,side);const rotation=yawQuaternion(yawDegrees);['left','right'].forEach((jaw)=>{const record=physicsBodies[`jaw_${side}_${jaw}`];if(!record)return;const local=rotateLocalOffset({x:(jaw==='left'?-1:1)*aperture,y:-GRIPPER_PAD_CENTER_Y,z:0},yawDegrees);const position={x:hand.x+local.x,y:hand.y+local.y,z:hand.z+local.z};record.body.setNextKinematicTranslation(position);record.body.setNextKinematicRotation(rotation);record.aperture=aperture;}); }
+      function pairIntersects(first,second) { if(!first||!second||!physicsWorld)return false;try{return Boolean(physicsWorld.intersectionPair(first.collider,second.collider));}catch(_){return false;} }
+      function updateJawContacts(state) { Object.entries(state.arms||{}).forEach(([side,arm])=>{const id=arm.object_id;const record=id&&physicsBodies[id];const action=state.plan?.actions?.find((item)=>item.object_id===id);if(!record||!action){return;}const eligible=Boolean(arm.gripper==='closed'&&arm.grasp_confirmed&&arm.holding===id&&record&&['gripping','carrying','placing'].includes(action.status));if(!eligible){if(!record.wasHeld){record.padContacts={left:false,right:false};record.contactStableSteps=0;record.centerStableSteps=0;record.graspAttemptSteps=0;record.graspMode=null;record.graspBlocked=false;record.yawErrorDeg=null;record.graspYawAligned=false;}return;}record.graspAttemptSteps=Math.min(CONTACT_RETRY_STEPS+1,(record.graspAttemptSteps||0)+1);const visualHand=smoothArmState[side]?.hand||armPose(side,arm).hand;const yawDegrees=effectiveYaw(arm,side);const desired=heldWorldPose(visualHand,arm,id,yawDegrees);const position=record.body.translation();const distance=Math.hypot(position.x-desired.x,position.y-desired.y,position.z-desired.z);const aligned=distance<=GRASP_TOLERANCE_M;const yawError=angleErrorDegrees(yawDegrees,Number(state.objects?.[id]?.rotation||0));const yawAligned=yawError<=YAW_TOLERANCE_DEG;const leftContact=pairIntersects(physicsBodies[`jaw_${side}_left`],record);const rightContact=pairIntersects(physicsBodies[`jaw_${side}_right`],record);const bothContacts=leftContact&&rightContact;record.padContacts={left:leftContact,right:rightContact};record.graspDistance=distance;record.graspAligned=aligned&&yawAligned;record.yawErrorDeg=yawError;record.graspYawAligned=yawAligned;record.centerStableSteps=aligned?Math.min(CONTACT_STABLE_STEPS,(record.centerStableSteps||0)+1):0;record.contactStableSteps=bothContacts&&aligned&&yawAligned?Math.min(CONTACT_STABLE_STEPS,(record.contactStableSteps||0)+1):0;record.graspMode=record.contactStableSteps>=CONTACT_STABLE_STEPS?'contact':record.graspAttemptSteps>=CONTACT_RETRY_STEPS&&record.centerStableSteps>=CONTACT_STABLE_STEPS&&yawAligned?'contact_fallback':'contact_pending';record.graspBlocked=!record.wasHeld&&record.graspMode==='contact_pending';}); }
+      function toneSceneMaterials() { if(!workcell)return false;workcell.traverse((node)=>{if(!node.isMesh||!node.material||Array.isArray(node.material)||!node.material.color)return;const mat=node.material;const color=mat.color;const hsl={};color.getHSL(hsl);const safety=color.r>color.g*1.45&&color.r>color.b*1.3;const amber=color.r>color.b*1.2&&color.g>color.b*1.2;if(safety){color.set(0x8d5753);}else if(amber){color.set(0x9b8965);}else{color.setHSL(.56,Math.min(.12,hsl.s*.2),Math.min(.72,Math.max(.10,hsl.l)));}if(mat.emissive){mat.emissive.set(0x101719);mat.emissiveIntensity=Math.min(mat.emissiveIntensity||0,.12);}});return true; }
+      function updateGraspDiagnostics() { if(!physicsReady||typeof OBJECT_GEOMETRY==='undefined')return;const diagnostics=Object.fromEntries(Object.entries(physicsBodies).filter(([id,record])=>OBJECT_GEOMETRY[id]&&record.graspMode).map(([id,record])=>{const action=sampledState.plan?.actions?.find((item)=>item.object_id===id);const side=action?.arm;const arm=side?sampledState.arms?.[side]:null;const hand=side?(smoothArmState[side]?.hand||armPose(side,arm).hand):null;const desired=hand&&arm?heldWorldPose(hand,arm,id,effectiveYaw(arm,side)):null;const position=record.body.translation();return[id,{mode:record.graspMode,held:Boolean(record.wasHeld),distance_mm:record.graspDistance==null?null:Number((record.graspDistance*1000).toFixed(2)),yaw_error_deg:record.yawErrorDeg==null?null:Number(Number(record.yawErrorDeg).toFixed(2)),left_pad_contact:Boolean(record.padContacts?.left),right_pad_contact:Boolean(record.padContacts?.right),attempts:record.graspAttemptSteps||0,center_stable_steps:record.centerStableSteps||0,contact_stable_steps:record.contactStableSteps||0,server:{x:arm?.x??null,y:arm?.y??null,z:arm?.z??null,phase:arm?.phase??null,holding:arm?.holding??null},body:{x:Number(position.x.toFixed(4)),y:Number(position.y.toFixed(4)),z:Number(position.z.toFixed(4))},desired:desired?{x:Number(desired.x.toFixed(4)),y:Number(desired.y.toFixed(4)),z:Number(desired.z.toFixed(4))}:null,authoritative_run_key:record.authoritativeRunKey,authoritative_pose_key:record.authoritativePoseKey}] }));$('gripStatus').setAttribute('data-grasp-diagnostics',JSON.stringify(diagnostics)); }
+      const matteSceneTimer=window.setInterval(()=>{if(webglReady&&toneSceneMaterials())window.clearInterval(matteSceneTimer);},250);
+      window.setInterval(updateGraspDiagnostics,250);
     </script>
   </body>
 </html>

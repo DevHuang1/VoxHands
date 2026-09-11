@@ -11,11 +11,35 @@ from .planner import TARGETS, build_plan
 from .safety import validate_plan
 
 
+SIM_HZ = 60
+SIM_DT = 1 / SIM_HZ
+RUN_DURATION_MS = 5000
+PLACEMENT_TOLERANCE_M = 0.01
+GRIP_CONFIRM_PROGRESS = 34
+PHASE_THRESHOLDS = (
+    (25, "reaching"),
+    (42, "gripping"),
+    (82, "carrying"),
+    (90, "placing"),
+    (92, "releasing"),
+    (96, "settling"),
+    (100, "returning"),
+)
+
 OBJECT_HOME = {
-    "blue_plate": {"label": "Blue plate", "color": "#62a6ff", "x": 0.22, "y": 0.69},
-    "cup": {"label": "Cup", "color": "#f5c86b", "x": 0.72, "y": 0.69},
-    "fork": {"label": "Fork", "color": "#dce7f5", "x": 0.40, "y": 0.77},
-    "spoon": {"label": "Spoon", "color": "#cad7e8", "x": 0.58, "y": 0.77},
+    "blue_plate": {"label": "Blue plate", "color": "#62a6ff", "x": 0.22, "y": 0.69, "z": 0.08, "rotation": 0, "holder": None, "settled": True, "target_error_cm": None, "target_locked": False, "release_pose": None, "settle_velocity": 0.0, "settle_locked": False, "grasp_confirmed": False},
+    "cup": {"label": "Cup", "color": "#f5c86b", "x": 0.72, "y": 0.69, "z": 0.12, "rotation": 0, "holder": None, "settled": True, "target_error_cm": None, "target_locked": False, "release_pose": None, "settle_velocity": 0.0, "settle_locked": False, "grasp_confirmed": False},
+    "fork": {"label": "Fork", "color": "#dce7f5", "x": 0.40, "y": 0.77, "z": 0.06, "rotation": 0, "holder": None, "settled": True, "target_error_cm": None, "target_locked": False, "release_pose": None, "settle_velocity": 0.0, "settle_locked": False, "grasp_confirmed": False},
+    "spoon": {"label": "Spoon", "color": "#cad7e8", "x": 0.58, "y": 0.77, "z": 0.06, "rotation": 0, "holder": None, "settled": True, "target_error_cm": None, "target_locked": False, "release_pose": None, "settle_velocity": 0.0, "settle_locked": False, "grasp_confirmed": False},
+}
+
+GRASP_PROFILES = {
+    # These heights place the visual jaw pads (30 cm below the wrist in the
+    # browser workcell) on the exact object center before a grasp is confirmed.
+    "blue_plate": {"jaw_width": 1.16, "grasp_width": 1.16, "half_height": 0.055, "hand_z": 0.139, "grasp_target": "plate_center"},
+    "cup": {"jaw_width": 0.54, "grasp_width": 0.54, "half_height": 0.20, "hand_z": 0.241, "grasp_target": "cup_center"},
+    "fork": {"jaw_width": 0.72, "grasp_width": 0.07, "half_height": 0.035, "hand_z": 0.125, "grasp_target": "handle_center"},
+    "spoon": {"jaw_width": 0.72, "grasp_width": 0.07, "half_height": 0.035, "hand_z": 0.125, "grasp_target": "handle_center"},
 }
 
 TARGET_POSITIONS = {
@@ -25,13 +49,37 @@ TARGET_POSITIONS = {
 }
 
 ARM_HOME = {
-    "left": {"x": 0.24, "y": 0.16, "angle": -25},
-    "right": {"x": 0.76, "y": 0.16, "angle": 25},
+    "left": {"x": 0.24, "y": 0.16, "z": 0.72, "angle": -25},
+    "right": {"x": 0.76, "y": 0.16, "z": 0.72, "angle": 25},
 }
 
 
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def minimum_jerk(progress: float) -> float:
+    """Quintic easing with zero velocity and acceleration at both endpoints."""
+    t = _clamp(progress, 0.0, 1.0)
+    return 10 * t**3 - 15 * t**4 + 6 * t**5
+
+
+def _blend(start: float, end: float, progress: float) -> float:
+    return start + (end - start) * minimum_jerk(progress)
+
+
+def _grip_aperture(object_id: str, closed: bool) -> float:
+    """Return the jaw center offset from the object geometry in workcell units."""
+    profile = GRASP_PROFILES.get(object_id, {})
+    grasp_width = float(profile.get("grasp_width", profile.get("jaw_width", 0.30)))
+    pad_half_width = 0.0525
+    if closed:
+        return round(max(pad_half_width + 0.006, grasp_width / 2 + pad_half_width - 0.002), 5)
+    return round(grasp_width / 2 + pad_half_width + 0.008, 5)
+
+
 class TableSettingSimulation:
-    """Deterministic MVP backend that mirrors the eventual MuJoCo control contract."""
+    """Deterministic planner/simulator boundary with a timestamped 60 Hz motion contract."""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -44,6 +92,7 @@ class TableSettingSimulation:
         with self._lock:
             self._run_token += 1
             self._worker = None
+            self._paused = False
             self.status = "idle"
             self.plan: Plan | None = None
             self.transcript = {"text": "", "status": "waiting", "source": "demo transcript"}
@@ -55,14 +104,53 @@ class TableSettingSimulation:
                 "recovery_count": 0,
                 "plan_latency_ms": 42,
                 "last_run_ms": None,
-                "sim_fps": 60,
+                "sim_fps": SIM_HZ,
                 "success_rate": 0,
+            }
+            self.motion = {
+                "revision": 0,
+                "elapsed_ms": 0,
+                "duration_ms": RUN_DURATION_MS,
+                "sample_hz": SIM_HZ,
+                "updated_at": utc_now(),
+                "phase": "parked",
+                "release_revision": None,
+                "settle_progress": 0.0,
+                "return_progress": 0.0,
+            }
+            self.physics = {
+                "engine": "rapier3d-browser",
+                "status": "ready",
+                "timestep_hz": SIM_HZ,
+                "contact_count": 0,
+                "collision_count": 0,
+                "last_contact": None,
+                "grasp_lock": False,
+                "drop_lock": False,
+                "settle_steps": 0,
+                "settle_velocity": 0.0,
+                "grasp_mode": None,
+                "left_pad_contact": False,
+                "right_pad_contact": False,
+                "grasp_distance_mm": None,
+                "grasp_attempts": 0,
+                "smoothness_max_step_mm": 0.0,
             }
             self._append_event("system", "VoxHands simulator ready. Both hands are parked.")
 
     def _append_event(self, kind: str, message: str) -> None:
         self.events.append({"time": utc_now(), "kind": kind, "message": message})
         self.events = self.events[-40:]
+
+    def _touch_motion(self, elapsed_ms: int, phase: str | None = None) -> None:
+        self.motion["revision"] += 1
+        self.motion["elapsed_ms"] = max(0, min(RUN_DURATION_MS, int(elapsed_ms)))
+        current_phase = phase or str(self.motion.get("phase", "parked"))
+        self.motion["phase"] = current_phase
+        percent = elapsed_ms / RUN_DURATION_MS * 100
+        self.motion["settle_progress"] = round(_clamp((percent - 92) / 3, 0, 1), 3)
+        self.motion["return_progress"] = round(_clamp((percent - 96) / 4, 0, 1), 3)
+        self.motion["updated_at"] = utc_now()
 
     def submit_command(self, raw_text: str) -> dict[str, Any]:
         plan = build_plan(raw_text)
@@ -81,13 +169,160 @@ class TableSettingSimulation:
                 return self.snapshot()
 
             self.status = "running"
+            self._paused = False
             plan.status = "executing"
+            self.motion = {
+                "revision": 0,
+                "elapsed_ms": 0,
+                "duration_ms": RUN_DURATION_MS,
+                "sample_hz": SIM_HZ,
+                "updated_at": utc_now(),
+                "phase": "reaching",
+                "release_revision": None,
+                "settle_progress": 0.0,
+                "return_progress": 0.0,
+            }
             self._append_event("voice", f'Heard: “{plan.raw_text}”')
             self._append_event("planner", f"Plan {plan.id} validated with {len(plan.actions)} action(s).")
             self._append_event("safety", "Safety gate passed: red zone and arm collision constraints enabled.")
             self._worker = threading.Thread(target=self._execute, args=(token, plan), daemon=True)
             self._worker.start()
             return self.snapshot()
+
+    def pause(self) -> dict[str, Any]:
+        with self._lock:
+            if self.status == "running" and self.plan:
+                self._paused = True
+                self.status = "paused"
+                self.plan.status = "paused"
+                self._append_event("control", "Motion paused by operator. Current arm poses are held safely.")
+            return self.snapshot()
+
+    def resume(self) -> dict[str, Any]:
+        with self._lock:
+            if self.status == "paused" and self.plan:
+                self._paused = False
+                self.status = "running"
+                self.plan.status = "executing"
+                self._append_event("control", "Motion resumed by operator.")
+            return self.snapshot()
+
+    def stop(self) -> dict[str, Any]:
+        with self._lock:
+            if self.status in {"running", "paused"} and self.plan:
+                self._run_token += 1
+                self._paused = False
+                self.status = "stopped"
+                self.plan.status = "stopped"
+                self.metrics["recovery_count"] += 1
+                self._append_event("safety", "All motion stopped by operator. Reset before starting another run.")
+            return self.snapshot()
+
+    def _phase_for(self, progress: float) -> str:
+        for threshold, phase in PHASE_THRESHOLDS:
+            if progress < threshold:
+                return phase
+        return "parked"
+
+    def _set_object_pose(
+        self,
+        object_id: str,
+        x: float,
+        y: float,
+        z: float,
+        rotation: float,
+        holder: str | None,
+        settled: bool,
+        grasp_confirmed: bool = False,
+        release_pose: dict[str, float] | None = None,
+        settle_locked: bool = False,
+        target: dict[str, float] | None = None,
+    ) -> None:
+        object_state = self.objects[object_id]
+        target_error_cm = None if target is None else round((((x - target["x"]) * 5) ** 2 + ((y - target["y"]) * 3.3) ** 2) ** 0.5 * 100, 3)
+        object_state.update({
+            "x": round(_clamp(x, 0.02, 0.98), 5),
+            "y": round(_clamp(y, 0.02, 0.98), 5),
+            "z": round(_clamp(z, 0.02, 0.8), 5),
+            "rotation": round(rotation, 5),
+            "holder": holder,
+            "settled": settled,
+            "motion": "settled" if settled else ("held" if holder else "moving"),
+            "target_error_cm": target_error_cm,
+            "target_locked": target_error_cm is not None and target_error_cm <= PLACEMENT_TOLERANCE_M * 100,
+            "release_pose": copy.deepcopy(release_pose),
+            "settle_velocity": 0.0,
+            "settle_locked": settle_locked,
+            "grasp_confirmed": grasp_confirmed,
+        })
+        object_state["pose"] = {"x": object_state["x"], "y": object_state["y"], "z": object_state["z"]}
+
+    def _update_action(self, action: Any, start: dict[str, float], progress: float) -> None:
+        phase = self._phase_for(progress)
+        action.progress = round(progress, 3)
+        action.status = "placed" if progress >= 100 else phase
+        target = TARGET_POSITIONS[action.target_id]
+        target_z = OBJECT_HOME[action.object_id]["z"]
+        grasp_confirmed = GRIP_CONFIRM_PROGRESS <= progress < 90
+        release_pose = {"x": target["x"], "y": target["y"], "z": target_z, "rotation": 0} if progress >= 90 else None
+        settle_locked = progress >= 92
+        if progress < 25:
+            object_x, object_y = start["x"], start["y"]
+            z = start["z"]
+            holder = None
+            settled = True
+        elif progress < 42:
+            object_x, object_y = start["x"], start["y"]
+            z = start["z"]
+            holder = action.arm if grasp_confirmed else None
+            settled = not grasp_confirmed
+        elif progress < 82:
+            carry_progress = (progress - 42) / 40
+            object_x = _blend(start["x"], target["x"], carry_progress)
+            object_y = _blend(start["y"], target["y"], carry_progress)
+            z = 0.28
+            holder = action.arm
+            settled = False
+        elif progress < 90:
+            object_x, object_y = target["x"], target["y"]
+            z = _blend(0.28, target_z + 0.08, (progress - 82) / 8)
+            holder = action.arm
+            settled = False
+        elif progress < 92:
+            object_x, object_y = target["x"], target["y"]
+            z = _blend(target_z + 0.08, target_z, (progress - 90) / 2)
+            holder = action.arm
+            settled = False
+        elif progress < 95:
+            object_x, object_y = target["x"], target["y"]
+            z = target_z
+            holder = None
+            settled = False
+        elif progress < 100:
+            object_x, object_y = target["x"], target["y"]
+            z = target_z
+            holder = None
+            settled = True
+        else:
+            object_x, object_y = target["x"], target["y"]
+            z = target_z
+            holder = None
+            settled = True
+            action.status = "placed"
+            action.progress = 100.0
+        self._set_object_pose(
+            action.object_id,
+            object_x,
+            object_y,
+            z,
+            0 if settled or progress >= 90 else progress / 100 * 0.08,
+            holder,
+            settled,
+            grasp_confirmed,
+            release_pose,
+            settle_locked,
+            target,
+        )
 
     def _execute(self, token: int, plan: Plan) -> None:
         started = time.perf_counter()
@@ -96,64 +331,109 @@ class TableSettingSimulation:
                 action.id: {
                     "x": self.objects[action.object_id]["x"],
                     "y": self.objects[action.object_id]["y"],
+                    "z": self.objects[action.object_id]["z"],
                 }
                 for action in plan.actions
             }
             for action in plan.actions:
                 action.status = "reaching"
-
-        with self._lock:
             self._append_event("vision", "Camera observation locked: tabletop objects identified.")
-            self._append_event("control", "Left and right arm trajectories scheduled in parallel where safe.")
+            self._append_event("control", "60 Hz minimum-jerk trajectories scheduled in parallel where safe.")
 
-        # Small, frequent updates make the arm and object motion visible in the browser
-        # while preserving a short hackathon demo loop.
-        steps = 60
-        for step in range(1, steps + 1):
-            time.sleep(0.065)
+        next_tick = started
+        active_elapsed_ms = 0.0
+        last_phase = ""
+        release_announced = False
+        while True:
+            next_tick += SIM_DT
+            delay = next_tick - time.perf_counter()
+            if delay > 0:
+                time.sleep(delay)
             with self._lock:
                 if token != self._run_token:
                     return
-                progress = step / steps * 100
+                if self._paused:
+                    next_tick = time.perf_counter()
+                    continue
+                active_elapsed_ms = min(RUN_DURATION_MS, active_elapsed_ms + SIM_DT * 1000)
+                elapsed_ms = round(active_elapsed_ms)
+                progress = _clamp(elapsed_ms / RUN_DURATION_MS * 100, 0, 100)
+                phase = self._phase_for(progress)
+                self._touch_motion(elapsed_ms, phase)
                 for action in plan.actions:
-                    action.progress = progress
-                    if step == steps:
-                        action.status = "placed"
-                    elif progress < 25:
-                        action.status = "reaching"
-                    elif progress < 42:
-                        action.status = "gripping"
-                    elif progress < 84:
-                        action.status = "carrying"
-                    else:
-                        action.status = "placing"
-
-                    target = TARGET_POSITIONS[action.target_id]
-                    start = starts[action.id]
-                    if progress < 42:
-                        object_x, object_y = start["x"], start["y"]
-                    else:
-                        carry_ratio = min((progress - 42) / 58, 1)
-                        object_x = start["x"] + (target["x"] - start["x"]) * carry_ratio
-                        object_y = start["y"] + (target["y"] - start["y"]) * carry_ratio
-                    self.objects[action.object_id]["x"] = object_x
-                    self.objects[action.object_id]["y"] = object_y
-                    self.objects[action.object_id]["motion"] = action.status
-
-                if step in {15, 25, 38, 50}:
-                    phase = plan.actions[0].status if plan.actions else "idle"
+                    self._update_action(action, starts[action.id], progress)
+                if phase != last_phase and phase in {"gripping", "carrying", "placing", "releasing", "settling", "returning"}:
                     self._append_event("control", f"{phase.title()} phase · trajectories {round(progress)}% complete.")
+                    last_phase = phase
+                if phase == "releasing" and not release_announced:
+                    self.motion["release_revision"] = self.motion["revision"]
+                    self._append_event("control", "Grippers opening at exact target centers; release handoff confirmed.")
+                    release_announced = True
+                if progress >= 100:
+                    break
 
         with self._lock:
             if token != self._run_token:
                 return
+            self._touch_motion(RUN_DURATION_MS, "parked")
+            for action in plan.actions:
+                self._update_action(action, starts[action.id], 100)
             elapsed_ms = round((time.perf_counter() - started) * 1000)
             plan.status = "complete"
             self.status = "complete"
             self.metrics["successful_runs"] += 1
             self.metrics["last_run_ms"] = elapsed_ms
             self.metrics["success_rate"] = round(self.metrics["successful_runs"] / self.metrics["commands"] * 100)
-            self._append_event("success", f"Task complete in {elapsed_ms} ms. Both hands returned to safe idle.")
+            self._append_event("physics", "Objects settled at exact target centers; browser attachment constraints cleared.")
+            self._append_event("success", f"Task complete in {elapsed_ms} ms. Both hands returned smoothly to safe idle.")
+
+    def record_physics_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Record browser telemetry without allowing it to mutate task safety or status."""
+        kind = str(payload.get("kind", "contact"))[:24]
+        pair = str(payload.get("pair", "scene contact"))[:80]
+        with self._lock:
+            if kind == "telemetry":
+                self.physics["grasp_lock"] = bool(payload.get("grasp_lock", False))
+                self.physics["drop_lock"] = bool(payload.get("drop_lock", False))
+                try:
+                    settle_steps = int(payload.get("settle_steps", 0))
+                except (TypeError, ValueError):
+                    settle_steps = 0
+                try:
+                    settle_velocity = float(payload.get("settle_velocity", 0.0))
+                except (TypeError, ValueError):
+                    settle_velocity = 0.0
+                try:
+                    grasp_distance_mm = float(payload.get("grasp_distance_mm"))
+                except (TypeError, ValueError):
+                    grasp_distance_mm = None
+                try:
+                    smoothness_max_step_mm = float(payload.get("smoothness_max_step_mm", 0.0))
+                except (TypeError, ValueError):
+                    smoothness_max_step_mm = 0.0
+                self.physics["settle_steps"] = max(0, min(12, settle_steps))
+                self.physics["settle_velocity"] = round(max(0.0, min(10.0, settle_velocity)), 4)
+                self.physics["grasp_mode"] = str(payload.get("grasp_mode"))[:24] if payload.get("grasp_mode") else None
+                self.physics["left_pad_contact"] = bool(payload.get("left_pad_contact", False))
+                self.physics["right_pad_contact"] = bool(payload.get("right_pad_contact", False))
+                self.physics["grasp_distance_mm"] = None if grasp_distance_mm is None else round(max(0.0, min(1000.0, grasp_distance_mm)), 3)
+                try:
+                    grasp_attempts = int(payload.get("grasp_attempts", 0))
+                except (TypeError, ValueError):
+                    grasp_attempts = 0
+                self.physics["grasp_attempts"] = max(0, min(120, grasp_attempts))
+                self.physics["smoothness_max_step_mm"] = round(max(0.0, min(1000.0, smoothness_max_step_mm)), 3)
+                return self.snapshot()
+            if kind not in {"contact", "collision", "settled"}:
+                return self.snapshot()
+            self.physics["contact_count"] += 1
+            self.physics["last_contact"] = pair
+            if kind == "collision":
+                self.physics["collision_count"] += 1
+                self._append_event("physics", f"Browser physics collision observed: {pair}.")
+            elif kind == "settled":
+                self._append_event("physics", f"Object settled: {pair}.")
+            return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -167,10 +447,9 @@ class TableSettingSimulation:
                 "events": copy.deepcopy(self.events),
                 "metrics": copy.deepcopy(self.metrics),
                 "runtime": copy.deepcopy(self.runtime),
-                "arms": {
-                    "left": self._arm_view("left"),
-                    "right": self._arm_view("right"),
-                },
+                "motion": copy.deepcopy(self.motion),
+                "physics": copy.deepcopy(self.physics),
+                "arms": {"left": self._arm_view("left"), "right": self._arm_view("right")},
             }
 
     def _arm_status(self, arm: str) -> str:
@@ -179,55 +458,63 @@ class TableSettingSimulation:
         statuses = [a.status for a in self.plan.actions if a.arm == arm]
         if self.status == "complete":
             return "parked"
-        if "moving" in statuses:
-            return "moving"
-        if statuses:
-            return statuses[-1]
-        return "standby"
+        return statuses[-1] if statuses else "standby"
 
     def _arm_view(self, arm: str) -> dict[str, Any]:
         home = ARM_HOME[arm]
         parked = {
-            "status": self._arm_status(arm),
-            "phase": "parked",
-            "x": home["x"],
-            "y": home["y"],
-            "angle": home["angle"],
-            "progress": 0,
+            "status": self._arm_status(arm), "phase": "parked", "x": home["x"], "y": home["y"], "z": home["z"],
+            "angle": home["angle"], "progress": 0, "gripper": "open", "grip_aperture": 0.20,
+            "holding": None, "grasp_confirmed": False, "grasp_target": None,
+            "pose": {"x": home["x"], "y": home["y"], "z": home["z"], "yaw": home["angle"]},
         }
-        if not self.plan or self.status != "running":
+        if not self.plan or self.status not in {"running", "paused", "stopped"}:
             return parked
-
-        action = next(
-            (candidate for candidate in self.plan.actions if candidate.arm == arm and candidate.status != "placed"),
-            None,
-        )
+        action = next((candidate for candidate in self.plan.actions if candidate.arm == arm and candidate.status != "placed"), None)
         if action is None:
             return parked
-
         object_position = self.objects[action.object_id]
         target = TARGET_POSITIONS[action.target_id]
         progress = action.progress
+        grasp_z = float(GRASP_PROFILES.get(action.object_id, {}).get("hand_z", 0.14))
+        carry_z = min(0.42, grasp_z + 0.24)
         if progress < 25:
             ratio = progress / 25
-            hand_x = home["x"] + (object_position["x"] - home["x"]) * ratio
-            hand_y = 0.24 + (object_position["y"] - 0.24) * ratio
-        elif progress < 84:
-            hand_x = object_position["x"]
-            hand_y = max(0.25, object_position["y"] - 0.12)
+            hand_x = _blend(home["x"], object_position["x"], ratio)
+            hand_y = _blend(0.24, object_position["y"], ratio)
+            hand_z = _blend(0.72, grasp_z, ratio)
+        elif progress < 42:
+            ratio = (progress - 25) / 17
+            hand_x, hand_y = object_position["x"], object_position["y"]
+            hand_z = _blend(grasp_z, grasp_z, ratio)
+        elif progress < 82:
+            ratio = (progress - 42) / 40
+            hand_x = _blend(object_position["x"], target["x"], ratio)
+            hand_y = _blend(object_position["y"], target["y"], ratio)
+            hand_z = carry_z
+        elif progress < 90:
+            ratio = (progress - 82) / 8
+            hand_x, hand_y = target["x"], target["y"]
+            hand_z = _blend(carry_z, grasp_z, ratio)
+        elif progress < 96:
+            hand_x, hand_y, hand_z = target["x"], target["y"], grasp_z
         else:
-            ratio = min((progress - 84) / 16, 1)
-            hand_x = object_position["x"] + (target["x"] - object_position["x"]) * ratio
-            hand_y = max(0.25, target["y"] - 0.12)
-
+            ratio = (progress - 96) / 4
+            hand_x = _blend(target["x"], home["x"], ratio)
+            hand_y = _blend(target["y"], 0.16, ratio)
+            hand_z = _blend(grasp_z, home["z"], ratio)
+        hand_x, hand_y, hand_z = _clamp(hand_x, 0.02, 0.98), _clamp(hand_y, 0.02, 0.98), _clamp(hand_z, 0.08, 0.8)
         direction = -1 if arm == "left" else 1
         angle = direction * (18 + abs(hand_x - home["x"]) * 42)
+        gripper = "closed" if action.status in {"gripping", "carrying", "placing"} else "open"
+        grasp_confirmed = bool(object_position.get("grasp_confirmed")) and object_position.get("holder") == arm
+        holding = action.object_id if gripper == "closed" and grasp_confirmed else None
+        grasp_profile = GRASP_PROFILES.get(action.object_id, {})
         return {
-            "status": self._arm_status(arm),
-            "phase": action.status,
-            "x": round(hand_x, 4),
-            "y": round(hand_y, 4),
-            "angle": round(angle, 2),
-            "progress": round(progress, 1),
-            "object_id": action.object_id,
+            "status": self._arm_status(arm), "phase": action.status, "x": round(hand_x, 5), "y": round(hand_y, 5),
+            "z": round(hand_z, 5), "angle": round(angle, 3), "progress": round(progress, 3), "object_id": action.object_id,
+            "gripper": gripper, "grip_aperture": _grip_aperture(action.object_id, gripper == "closed"),
+            "holding": holding, "grasp_confirmed": grasp_confirmed,
+            "grasp_target": {"object_id": action.object_id, "profile": grasp_profile.get("grasp_target", "object_center")},
+            "pose": {"x": round(hand_x, 5), "y": round(hand_y, 5), "z": round(hand_z, 5), "yaw": round(angle, 3)},
         }
