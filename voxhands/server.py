@@ -15,7 +15,7 @@ FRONTEND = ROOT / "frontend"
 
 
 class VoxHandsHandler(BaseHTTPRequestHandler):
-    server_version = "VoxHands/0.1"
+    server_version = "VoxHands/0.2"
 
     @property
     def simulation(self) -> TableSettingSimulation:
@@ -54,7 +54,7 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
             self._json(self.simulation.snapshot())
             return
         if self.path == "/api/health":
-            self._json({"ok": True, "service": "voxhands", "version": "0.1.0"})
+            self._json({"ok": True, "service": "voxhands", "version": "0.2.0"})
             return
         if self.path in {"/", "/index.html"}:
             self._serve_file(FRONTEND / "index.html")
@@ -69,6 +69,18 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
                 self._json({"error": "Command text is required."}, 400)
                 return
             self._json(self.simulation.submit_command(text))
+            return
+        if self.path == "/api/physics-event":
+            self._json(self.simulation.record_physics_event(self._read_json()))
+            return
+        if self.path == "/api/control":
+            action = str(self._read_json().get("action", "")).strip().lower()
+            handlers = {"pause": self.simulation.pause, "resume": self.simulation.resume, "stop": self.simulation.stop}
+            handler = handlers.get(action)
+            if handler is None:
+                self._json({"error": "Control action must be pause, resume, or stop."}, 400)
+                return
+            self._json(handler())
             return
         if self.path == "/api/reset":
             self.simulation.reset()
@@ -111,4 +123,3 @@ def main() -> None:
         print("\nStopping VoxHands.")
     finally:
         server.server_close()
-

@@ -51,7 +51,14 @@ def build_plan(raw_text: str) -> Plan:
         text = "set the table for two"
 
     mentions = _object_mentions(text)
-    if not mentions and ("table" in text or "place" in text or "arrange" in text):
+    # Only use the demo's default pair for an explicit table-setting request.
+    # A command such as "place the red one" must not silently become a table
+    # setting plan merely because it contains the verb "place".
+    default_table_request = any(
+        phrase in text
+        for phrase in ("set the table", "set table", "arrange the table", "prepare the table", "table for")
+    )
+    if not mentions and default_table_request:
         mentions = ["blue_plate", "cup"]
 
     # Preserve a stable, demo-friendly order even if the sentence names the cup first.
@@ -96,4 +103,3 @@ def build_plan(raw_text: str) -> Plan:
         actions=actions,
         constraints=constraints,
     )
-

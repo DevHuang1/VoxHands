@@ -10,7 +10,10 @@ def validate_plan(plan: Plan) -> list[str]:
     used_arms: set[str] = set()
 
     if not plan.actions:
-        issues.append("No recognized tabletop objects were found in the command.")
+        issues.append("No recognized grippable tabletop object was found in the command.")
+        text = plan.raw_text.lower()
+        if "red" in text and any(word in text for word in ("pick", "grab", "lift", "move", "place")):
+            issues.append("The red item is the no-go safety barrier and cannot be picked up.")
 
     for action in plan.actions:
         if action.target_id not in TARGETS:
@@ -28,4 +31,3 @@ def validate_plan(plan: Plan) -> list[str]:
     if "avoid_red_zone" not in plan.constraints:
         plan.constraints.append("avoid_red_zone")
     return issues
-
