@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from .simulation import TableSettingSimulation
+from .planner import build_plan
+from .safety import validate_plan
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,12 +37,13 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _read_json(self) -> dict[str, Any]:
-        try:
-            length = min(int(self.headers.get("Content-Length", "0")), 32_000)
-            data = json.loads(self.rfile.read(length) or b"{}")
-            return data if isinstance(data, dict) else {}
-        except (ValueError, json.JSONDecodeError):
-            return {}
+        length = int(self.headers.get("Content-Length", "0"))
+        if not 0 <= length <= 32_000:
+            raise ValueError("Request body must be at most 32000 bytes.")
+        data = json.loads(self.rfile.read(length) or b"{}")
+        if not isinstance(data, dict):
+            raise ValueError("Expected a JSON object.")
+        return data
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)
@@ -56,19 +59,49 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
         if self.path == "/api/health":
             self._json({"ok": True, "service": "voxhands", "version": "0.2.0"})
             return
+        if self.path.startswith("/vendor/"):
+            name = self.path.removeprefix("/vendor/")
+            if name not in {"three.module.js", "rapier.es.js", "THREE-LICENSE.txt", "RAPIER-LICENSE.txt"}:
+                self._json({"error": "Not found"}, 404)
+                return
+            self._serve_file(FRONTEND / "vendor" / name)
+            return
         if self.path in {"/", "/index.html"}:
             self._serve_file(FRONTEND / "index.html")
             return
         self._json({"error": "Not found"}, 404)
 
     def do_POST(self) -> None:
+        try:
+            self._post()
+        except (ValueError, UnicodeDecodeError) as error:
+            self._json({"error": str(error)}, 400)
+
+    def _post(self) -> None:
         if self.path == "/api/command":
             payload = self._read_json()
-            text = str(payload.get("text", "")).strip()
+            text = payload.get("text", "")
+            if not isinstance(text, str):
+                raise ValueError("Command text must be a string.")
+            text = text.strip()
             if not text:
                 self._json({"error": "Command text is required."}, 400)
                 return
-            self._json(self.simulation.submit_command(text))
+            result = self.simulation.submit_command(text)
+            self._json(result, 409 if "error" in result else 200)
+            return
+        if self.path == "/api/plan":
+            payload = self._read_json()
+            text = payload.get("text", "")
+            if not isinstance(text, str):
+                raise ValueError("Command text must be a string.")
+            text = text.strip()
+            if not text:
+                self._json({"error": "Command text is required."}, 400)
+                return
+            plan = build_plan(text)
+            issues = validate_plan(plan)
+            self._json({"valid": not issues, "safety_issues": issues, "plan": plan.to_dict()})
             return
         if self.path == "/api/physics-event":
             self._json(self.simulation.record_physics_event(self._read_json()))
@@ -93,13 +126,15 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
             self._json({"error": "Frontend file missing."}, 500)
             return
         body = path.read_bytes()
-        content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+        content_type = "text/javascript" if path.suffix == ".js" else mimetypes.guess_type(str(path))[0] or "application/octet-stream"
         self.send_response(200)
         self._headers(content_type, len(body))
         self.end_headers()
         self.wfile.write(body)
 
     def log_message(self, format: str, *args: Any) -> None:
+        if self.path in {"/api/state", "/api/physics-event"} and args and str(args[1]) == "200":
+            return
         print(f"[voxhands] {self.address_string()} - {format % args}")
 
 

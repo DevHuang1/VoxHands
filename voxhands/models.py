@@ -52,6 +52,8 @@ class Plan:
     status: str = "ready"
     safety_issues: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=utc_now)
+    recognized_objects: list[str] = field(default_factory=list)
+    suggestions: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -63,5 +65,7 @@ class Plan:
             "status": self.status,
             "safety_issues": self.safety_issues,
             "created_at": self.created_at,
+            "recognized_objects": self.recognized_objects,
+            "suggestions": self.suggestions,
         }
 
