@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
+import signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,7 @@ from typing import Any
 from .simulation import TableSettingSimulation
 from .planner import build_plan
 from .safety import validate_plan
+from .groq import GroqClient, ai_build_plan
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -22,6 +25,10 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
     @property
     def simulation(self) -> TableSettingSimulation:
         return self.server.simulation  # type: ignore[attr-defined]
+
+    @property
+    def groq(self) -> GroqClient:
+        return self.server.groq  # type: ignore[attr-defined]
 
     def _headers(self, content_type: str, length: int) -> None:
         self.send_header("Content-Type", content_type)
@@ -87,8 +94,29 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
             if not text:
                 self._json({"error": "Command text is required."}, 400)
                 return
-            result = self.simulation.submit_command(text)
+            style = payload.get("style") if isinstance(payload.get("style"), str) else None
+            gesture = payload.get("gesture") if isinstance(payload.get("gesture"), str) else None
+            plan, reply = ai_build_plan(text, self.groq, style=style, gesture=gesture)
+            if plan.mode == "conversation":
+                self._json(self.simulation.reply(text, reply, plan.llm_provider, suggestions=plan.suggestions))
+                return
+            result = self.simulation.submit_command(text, plan=plan, reply=reply)
             self._json(result, 409 if "error" in result else 200)
+            return
+        if self.path == "/api/chat":
+            payload = self._read_json()
+            text = payload.get("text", "")
+            if not isinstance(text, str):
+                raise ValueError("Message text must be a string.")
+            text = text.strip()
+            if not text:
+                self._json({"error": "Message text is required."}, 400)
+                return
+            style = payload.get("style") if isinstance(payload.get("style"), str) else None
+            gesture = payload.get("gesture") if isinstance(payload.get("gesture"), str) else None
+            plan, reply = ai_build_plan(text, self.groq, style=style, gesture=gesture)
+            result = self.simulation.reply(text, reply, plan.llm_provider, suggestions=plan.suggestions)
+            self._json(result)
             return
         if self.path == "/api/plan":
             payload = self._read_json()
@@ -142,19 +170,27 @@ class VoxHandsServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int]) -> None:
         super().__init__(address, VoxHandsHandler)
         self.simulation = TableSettingSimulation()
+        self.groq = GroqClient()
         self.daemon_threads = True
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the VoxHands MVP server")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
     args = parser.parse_args()
     server = VoxHandsServer((args.host, args.port))
     print(f"VoxHands running at http://{args.host}:{args.port}")
+
+    def _stop(_signum: int, _frame: Any) -> None:
+        print("\nStopping VoxHands.")
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _stop)
+    signal.signal(signal.SIGINT, _stop)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping VoxHands.")
+        pass
     finally:
         server.server_close()

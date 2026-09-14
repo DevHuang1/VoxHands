@@ -26,6 +26,11 @@ class Action:
     status: str = "queued"
     progress: float = 0.0
     note: str = ""
+    style: str = "standard"
+    speed: float = 1.0
+    gesture: str = "none"
+    pause_ms: int = 0
+    condition: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +44,11 @@ class Action:
             "status": self.status,
             "progress": round(self.progress, 1),
             "note": self.note,
+            "style": self.style,
+            "speed": self.speed,
+            "gesture": self.gesture,
+            "pause_ms": self.pause_ms,
+            "condition": self.condition,
         }
 
 
@@ -54,6 +64,9 @@ class Plan:
     created_at: str = field(default_factory=utc_now)
     recognized_objects: list[str] = field(default_factory=list)
     suggestions: list[dict[str, str]] = field(default_factory=list)
+    llm_reply: str = ""
+    llm_provider: str = "keyword"
+    mode: str = "command"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -67,5 +80,8 @@ class Plan:
             "created_at": self.created_at,
             "recognized_objects": self.recognized_objects,
             "suggestions": self.suggestions,
+            "llm_reply": self.llm_reply,
+            "llm_provider": self.llm_provider,
+            "mode": self.mode,
         }
 

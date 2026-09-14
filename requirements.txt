@@ -1,0 +1,2 @@
+# VoxHands has no required third-party Python packages; the runtime is the
+# Python standard library. Keeping this file present lets Render build cleanly.

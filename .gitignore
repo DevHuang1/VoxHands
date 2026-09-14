@@ -6,3 +6,6 @@ env/
 .env
 .DS_Store
 
+
+# dotenv files may contain local secrets
+.env.local

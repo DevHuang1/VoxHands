@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: voxhands
+    runtime: python
+    region: oregon
+    buildCommand: ""
+    startCommand: python run.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: GROQ_API_KEY
+        sync: false

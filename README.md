@@ -39,6 +39,26 @@ use the live API normally.
 
 To stop the server, press `Ctrl+C` in the terminal where it is running.
 
+## Deploy to Render
+
+Render is a good fit because VoxHands is a stateful, long-running process:
+motion runs on a background thread and the browser polls `/api/state`. A single
+Render web service serves both the dashboard and the API (do **not** use
+Gunicorn/multiple workers; they would break the shared simulation state).
+
+Deploy with the included blueprint:
+
+1. Push this repository to GitHub.
+2. In Render, choose **New → Blueprint** (`render.yaml` is included).
+3. Supply the `GROQ_API_KEY` env var when prompted (leave blank for keyword
+   planning), or add it in the service's **Environment** tab afterward.
+4. Keep `HOST`/`PORT` defaults: the server binds `0.0.0.0` and reads Render's
+   `$PORT`. Health checks use `/api/health`.
+
+The server honors `Ctrl+C` locally and handles Render's `SIGTERM` gracefully.
+Free-tier instances can sleep after idle; a cold start can take about a minute
+before the first request wakes the service.
+
 ## Try the demo
 
 Use the default command or paste this into the command field:
@@ -69,6 +89,54 @@ Useful controls in the dashboard:
 The visible red item is the no-go safety barrier. It is not a grippable
 object. A request such as `Pick up the red one and place it on the left.` is
 blocked rather than silently converted into the default table-setting task.
+
+## Groq AI conversational control (optional)
+
+Set a Groq API key and the command pipeline upgrades from the keyword planner to
+a full conversational controller:
+
+```bash
+# option A: shell environment variable
+export GROQ_API_KEY="gsk_..."
+
+# option B: project .env.local (auto-loaded, git-ignored)
+cp .env.local.example .env.local
+# then paste your key into .env.local  ->  GROQ_API_KEY=gsk_...
+
+python run.py
+```
+
+No Python package is needed: the client talks to Groq's OpenAI-compatible
+endpoint with the standard library only. When the key is absent, commands fall
+back to the deterministic keyword planner and the dashboard shows
+`Groq AI · unavailable`. `GROQ_MODEL` may also be set in the shell or
+`.env.local` to override the default model `openai/gpt-oss-120b`. If the
+primary request fails, VoxHands tries `GROQ_FALLBACK_MODEL` (default
+`openai/gpt-oss-20b`) before falling back to the deterministic keyword planner.
+
+The AI understands natural language motion intent, including style cues and
+gestures:
+
+- **Movement styles** (speed, easing, and carry trajectory):
+  `standard`, `gentle` (slow/soft), `precise` (careful/low), `rapid` (fast),
+  `playful` (bouncy arc), `wavy` (sinuous weave).
+- **Gestures** performed with both hands after placement: `wave`, `bow`,
+  `dance`, `point`.
+- **Conditions**: hold/pause at the target (`pause_ms`) and sequencing notes
+  such as "after the plate is placed" or "only if the path is clear" are carried
+  on the action and reflected in the plan; the red-zone, occupancy, and
+  serialization guards are always enforced by the safety validator.
+- **Conversational turns**: greetings and questions (`"hello"`, `"what can you
+  do?"`) get an AI reply without starting motion. The reply appears in the
+  command panel; a chat-only alias is `POST /api/chat`.
+
+The dashboard adds **Style** and **Gesture** selectors that are sent with every
+command as JSON overrides, so a styled run works even with the keyword fallback.
+An example styled request:
+
+```text
+gently place the cup on the right and the plate on the left, then wave
+```
 
 ## How the system works
 
@@ -133,7 +201,8 @@ The local server exposes these endpoints:
 | `GET` | `/api/health` | Basic service health check. |
 | `GET` | `/api/state` | Current plan, objects, arms, motion, physics, events, and runtime status. |
 | `POST` | `/api/plan` | Validate and preview a command without starting a run. |
-| `POST` | `/api/command` | Submit `{"text":"..."}` for planning and execution. |
+| `POST` | `/api/command` | Submit `{"text":"...", "style?":"", "gesture?":""}` for planning and execution. Conversational intents return an AI reply without starting motion. |
+| `POST` | `/api/chat` | Submit `{"text":"..."}` and get an AI reply only; never starts a motion run. |
 | `POST` | `/api/control` | Submit `{"action":"pause"}`, `resume`, or `stop`. |
 | `POST` | `/api/reset` | Reset the deterministic simulator and return the new state. |
 | `POST` | `/api/physics-event` | Submit browser contact, collision, settling, or telemetry data. |
@@ -169,15 +238,20 @@ clients submit intent and browser observations only.
 ## Project layout
 
 ```text
-run.py                    Local server entry point
-voxhands/planner.py       Command parsing and arm/target assignment
+run.py                    Local server entry point (reads HOST/PORT env)
+render.yaml               Render Blueprint deployment configuration
+runtime.txt               Render Python version pin (3.11.9)
+requirements.txt          Empty on purpose; VoxHands is standard-library-only
+voxhands/planner.py       Keyword command parsing and arm/target assignment
+voxhands/groq.py          Groq LLM client, system prompt, and AI plan builder
+voxhands/styles.py        Movement-style registry, easing, and gesture keyframes
 voxhands/safety.py        Plan validation and red-zone safety rules
 voxhands/simulation.py    Deterministic 60 Hz server-side task simulation
 voxhands/server.py        Standard-library HTTP server and API routes
 voxhands/models.py        Plan, action, and snapshot data models
 voxhands/integrations.py  Optional runtime availability detection
 frontend/index.html       Dashboard, Three.js scene, and Rapier3D physics
-tests/test_core.py        Planner, safety, simulation, and API-contract tests
+tests/                    Keyword, AI, simulation, and API-contract tests
 ```
 
 ## Verification
@@ -227,8 +301,9 @@ the laptop is connected to hardware or an NPU.
 
 The intended next step is to replace `TableSettingSimulation` with the
 Intel-provided MuJoCo/LeRobot backend while preserving the existing plan,
-safety, HTTP, and browser telemetry contracts. Free-form model output should
-continue to produce intent only; it must not drive robot motors directly.
+safety, HTTP, and browser telemetry contracts. Groq conversational planning is
+implemented and gated on `GROQ_API_KEY`; free-form model output still produces
+intent and action structure only, never raw motor commands.
 
 ## Improved command and execution behavior
 

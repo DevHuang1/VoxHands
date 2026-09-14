@@ -1,6 +1,20 @@
 from __future__ import annotations
 
+import os
 from typing import Any
+
+
+def groq_status() -> dict[str, Any]:
+    has_key = bool(os.getenv("GROQ_API_KEY"))
+    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    return {
+        "name": "Groq AI",
+        "available": has_key,
+        "active": has_key,
+        "mode": "Groq LLM conversational control; styles & gestures enabled" if has_key else "GROQ_API_KEY not set; keyword planner active",
+        "model": model if has_key else None,
+        "fallback_model": os.getenv("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b") if has_key else None,
+    }
 
 
 def openvino_status() -> dict[str, Any]:
@@ -52,9 +66,9 @@ def speechmatics_status() -> dict[str, Any]:
 
 def runtime_status() -> dict[str, Any]:
     return {
+        "groq": groq_status(),
         "openvino": openvino_status(),
         "speechmatics": speechmatics_status(),
         "robotics": {"name": "MuJoCo / LeRobot", "available": False, "active": False, "mode": "Robot execution adapter not implemented"},
         "simulator": {"name": "VoxHands deterministic simulator", "available": True, "active": True, "mode": "Deterministic simulation; no physical hardware"},
     }
-

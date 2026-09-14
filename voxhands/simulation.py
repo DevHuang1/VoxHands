@@ -10,6 +10,7 @@ from .integrations import runtime_status
 from .models import Plan, utc_now
 from .planner import TARGETS, build_plan
 from .safety import validate_plan
+from .styles import GESTURES, STYLES, easing as _style_easing, trajectory_offset
 
 
 SIM_HZ = 60
@@ -95,6 +96,11 @@ class TableSettingSimulation:
             self._run_token += 1
             self._worker = None
             self._paused = False
+            self._gesture = None
+            self._gesture_start = 0
+            self._gesture_duration = 0
+            self._hold_ms = 0
+            self._base_run_ms = 0
             self.status = "idle"
             self.plan: Plan | None = None
             self.transcript = {"text": "", "status": "waiting", "source": "typed input / browser speech"}
@@ -120,6 +126,10 @@ class TableSettingSimulation:
                 "release_revision": None,
                 "settle_progress": 0.0,
                 "return_progress": 0.0,
+                "gesture": None,
+                "gesture_ms": 0,
+                "gesture_duration_ms": 0,
+                "hold_ms": 0,
             }
             self.physics = {
                 "engine": "rapier3d-browser",
@@ -155,9 +165,12 @@ class TableSettingSimulation:
         self.motion["return_progress"] = round(_clamp((percent - 96) / 4, 0, 1), 3)
         self.motion["updated_at"] = utc_now()
 
-    def submit_command(self, raw_text: str) -> dict[str, Any]:
+    def submit_command(self, raw_text: str, plan: Plan | None = None, reply: str | None = None) -> dict[str, Any]:
         planning_started = time.perf_counter()
-        plan = build_plan(raw_text)
+        if plan is None:
+            plan = build_plan(raw_text)
+        if reply is not None:
+            plan.llm_reply = reply
         issues = validate_plan(plan)
         with self._lock:
             if plan.intent == "calibration":
@@ -201,10 +214,21 @@ class TableSettingSimulation:
                 if not self._route_clear(route):
                     issues.append(f"No clear simulated center path for {action.object_label}; reset the workcell.")
                 self._routes[action.id] = route
-                action.duration_ms = RUN_DURATION_MS * (2 if len(route) > 2 else 1)
+                speed = float(action.speed or 1.0)
+                speed = max(0.3, min(3.0, speed))
+                action.duration_ms = int((RUN_DURATION_MS * (2 if len(route) > 2 else 1)) / speed)
                 self._offsets[action.id] = 0 if parallel else scheduled_ms
                 scheduled_ms += action.duration_ms
-                action.note = "Separate lanes in parallel" if parallel else f"Sequential move {index+1}"
+                style_note = f" · {STYLES[action.style]['label']} style"
+                gesture_note = f" · {GESTURES[action.gesture]['label']} after" if action.gesture != "none" else ""
+                action.note = ("Separate lanes in parallel" if parallel else f"Sequential move {index+1}") + style_note + gesture_note
+            base_run_ms = max((self._offsets[a.id] + a.duration_ms for a in plan.actions), default=RUN_DURATION_MS)
+            self._base_run_ms = base_run_ms
+            self._hold_ms = max((max(0, int(a.pause_ms or 0)) for a in plan.actions), default=0)
+            self._gesture = next((a.gesture for a in plan.actions if a.gesture and a.gesture != "none"), None)
+            self._gesture_duration = int(GESTURES.get(self._gesture, {}).get("duration_ms", 0)) if self._gesture else 0
+            self._gesture_start = base_run_ms + self._hold_ms
+            planned_duration = self._gesture_start + self._gesture_duration
             self.metrics["plan_latency_ms"] = round((time.perf_counter()-planning_started)*1000, 3)
             self._run_token += 1
             token = self._run_token
@@ -226,15 +250,23 @@ class TableSettingSimulation:
             self.motion = {
                 "revision": 0,
                 "elapsed_ms": 0,
-                "duration_ms": max((self._offsets[a.id] + a.duration_ms for a in plan.actions), default=RUN_DURATION_MS),
+                "duration_ms": planned_duration,
                 "sample_hz": SIM_HZ,
                 "updated_at": utc_now(),
                 "phase": "reaching",
                 "release_revision": None,
                 "settle_progress": 0.0,
                 "return_progress": 0.0,
+                "gesture": self._gesture,
+                "gesture_ms": self._gesture_start,
+                "gesture_duration_ms": self._gesture_duration,
+                "hold_ms": self._hold_ms,
             }
             self._append_event("voice", f'Heard: “{plan.raw_text}”')
+            if self._hold_ms:
+                self._append_event("control", f"Holding {self._hold_ms} ms at placement before returning.")
+            if self._gesture:
+                self._append_event("control", f"{GESTURES[self._gesture]['label']} gesture scheduled after placement.")
             self._append_event("planner", f"Plan {plan.id} validated with {len(plan.actions)} action(s).")
             self._append_event("safety", "Simulation center paths checked against the barrier; shared moves serialized.")
             self._worker = threading.Thread(target=self._execute, args=(token, plan), daemon=True)
@@ -285,6 +317,13 @@ class TableSettingSimulation:
                 self.plan.status = "stopped"
                 self.metrics["recovery_count"] += 1
                 self._append_event("safety", "All motion stopped by operator. Reset before starting another run.")
+            return self.snapshot()
+
+    def reply(self, raw_text: str, reply_text: str, provider: str, suggestions: list | None = None) -> dict[str, Any]:
+        """Surface an AI natural-language reply without starting a motion run."""
+        with self._lock:
+            self.transcript = {"text": raw_text, "status": "final", "source": provider, "reply": reply_text, "suggestions": suggestions or []}
+            self._append_event("ai", f"{provider or 'AI'} · {reply_text}")
             return self.snapshot()
 
     def _phase_for(self, progress: float) -> str:
@@ -362,8 +401,18 @@ class TableSettingSimulation:
             settled = not grasp_confirmed
         elif progress < 82:
             carry_progress = _clamp((progress - 46) / 36, 0, 1)
-            object_x, object_y = self._route_pose(self._routes[action.id], carry_progress)
-            z = _blend(start["z"], 0.28, (progress-42)/4)
+            eased = _style_easing(action.style, carry_progress)
+            object_x, object_y = self._route_pose(self._routes[action.id], eased)
+            offsets = trajectory_offset(action.style, carry_progress)
+            if "lateral" in offsets:
+                dx = target["x"] - start["x"]
+                dy = target["y"] - start["y"]
+                length = math.hypot(dx, dy) or 1.0
+                object_x += -dy / length * offsets["lateral"]
+                object_y += dx / length * offsets["lateral"]
+            z = _blend(start["z"], float(STYLES.get(action.style, {}).get("lift", 0.28)), (progress - 42) / 4)
+            if "bob" in offsets:
+                z = z + offsets["bob"]
             holder = action.arm
             settled = False
         elif progress < 90:
@@ -433,6 +482,7 @@ class TableSettingSimulation:
         active_elapsed_ms = 0.0
         last_phase = ""
         release_announced = False
+        gesture_announced = False
         while True:
             next_tick += SIM_DT
             delay = next_tick - time.perf_counter()
@@ -453,6 +503,10 @@ class TableSettingSimulation:
                 current = next((a for a in plan.actions if a.status not in {"queued", "placed"}), plan.actions[-1])
                 progress = current.progress
                 phase = self._phase_for(progress)
+                if self._gesture and elapsed_ms >= self._gesture_start:
+                    phase = self._gesture
+                elif self._hold_ms and elapsed_ms >= self._base_run_ms:
+                    phase = "hold"
                 self._touch_motion(elapsed_ms, phase)
                 if phase != last_phase and phase in {"gripping", "carrying", "placing", "releasing", "settling", "returning"}:
                     self._append_event("control", f"{phase.title()} phase · trajectories {round(progress)}% complete.")
@@ -461,6 +515,9 @@ class TableSettingSimulation:
                     self.motion["release_revision"] = self.motion["revision"]
                     self._append_event("control", "Grippers opening at exact target centers; release handoff confirmed.")
                     release_announced = True
+                if phase == self._gesture and not gesture_announced:
+                    self._append_event("control", f"Gesture {phase} executing with both hands.")
+                    gesture_announced = True
                 if elapsed_ms >= self.motion["duration_ms"]:
                     break
 
@@ -535,6 +592,11 @@ class TableSettingSimulation:
                 "status": self.status,
                 "transcript": copy.deepcopy(self.transcript),
                 "plan": self.plan.to_dict() if self.plan else None,
+                "ai": {
+                    "provider": self.plan.llm_provider if self.plan else "none",
+                    "reply": self.plan.llm_reply if self.plan else "",
+                    "enabled": bool(self.runtime.get("groq", {}).get("available")),
+                },
                 "objects": copy.deepcopy(self.objects),
                 "targets": {**copy.deepcopy(TARGET_POSITIONS), **{tid: {"label": TARGETS[tid]["label"], **self._target_position(tid)} for tid in ("plate_surface", "cup_interior")}},
                 "red_zone": {"x": 0.44, "y": 0.53, "width": 0.12, "height": 0.26},
@@ -554,6 +616,35 @@ class TableSettingSimulation:
             return "parked"
         return statuses[-1] if statuses else "standby"
 
+    def _gesture_pose(self, arm: str) -> dict[str, float] | None:
+        """Return the interpolated arm pose while a post-task gesture is playing."""
+        gesture = self.motion.get("gesture")
+        if not gesture or gesture == "none":
+            return None
+        start = float(self.motion.get("gesture_ms") or 0)
+        duration = float(self.motion.get("gesture_duration_ms") or 0)
+        elapsed = float(self.motion.get("elapsed_ms") or 0)
+        if duration <= 0 or elapsed < start:
+            return None
+        keyframes = GESTURES.get(gesture, {}).get("keyframes", {}).get(arm) or []
+        if not keyframes:
+            return None
+        scaled = min(len(keyframes) - 1 - 1e-9, ((elapsed - start) / duration) * (len(keyframes) - 1))
+        index = int(scaled)
+        fraction = scaled - index
+        first = keyframes[index]
+        second = keyframes[index + 1]
+        eased = minimum_jerk(fraction)
+        pose = {
+            "name": gesture,
+            "progress": (elapsed - start) / duration,
+            "x": round(first["x"] + (second["x"] - first["x"]) * eased, 5),
+            "y": round(first["y"] + (second["y"] - first["y"]) * eased, 5),
+            "z": round(first["z"] + (second["z"] - first["z"]) * eased, 5),
+            "angle": round(first["angle"] + (second["angle"] - first["angle"]) * eased, 3),
+        }
+        return pose
+
     def _arm_view(self, arm: str) -> dict[str, Any]:
         home = ARM_HOME[arm]
         parked = {
@@ -564,6 +655,16 @@ class TableSettingSimulation:
         }
         if not self.plan or self.status not in {"running", "paused", "stopped"}:
             return parked
+        gesture_pose = self._gesture_pose(arm)
+        if gesture_pose:
+            return {
+                **parked,
+                "status": "gesture",
+                "phase": gesture_pose["name"],
+                "x": gesture_pose["x"], "y": gesture_pose["y"], "z": gesture_pose["z"],
+                "angle": gesture_pose["angle"], "progress": round(gesture_pose["progress"] * 100, 3),
+                "pose": {"x": gesture_pose["x"], "y": gesture_pose["y"], "z": gesture_pose["z"], "yaw": gesture_pose["angle"]},
+            }
         action = next((candidate for candidate in self.plan.actions if candidate.arm == arm and candidate.status not in {"placed", "queued"}), None)
         if action is None:
             return parked
@@ -573,26 +674,26 @@ class TableSettingSimulation:
         grasp_z = float(GRASP_PROFILES.get(action.object_id, {}).get("hand_z", 0.14))
         carry_z = min(0.42, grasp_z + 0.24)
         if progress < 25:
-            ratio = progress / 25
+            ratio = _style_easing(action.style, progress / 25)
             hand_x = _blend(home["x"], object_position["x"], ratio)
             hand_y = _blend(home["y"], object_position["y"], ratio)
             hand_z = _blend(0.72, grasp_z, ratio)
         elif progress < 42:
-            ratio = (progress - 25) / 17
+            ratio = _style_easing(action.style, (progress - 25) / 17)
             hand_x, hand_y = object_position["x"], object_position["y"]
             hand_z = _blend(grasp_z, grasp_z, ratio)
         elif progress < 82:
-            ratio = (progress - 42) / 40
+            ratio = _style_easing(action.style, (progress - 42) / 40)
             hand_x, hand_y = object_position["x"], object_position["y"]
-            hand_z = _blend(grasp_z, carry_z, (progress-42)/4)
+            hand_z = _blend(grasp_z, carry_z, _style_easing(action.style, (progress - 42) / 4))
         elif progress < 90:
-            ratio = (progress - 82) / 8
+            ratio = _style_easing(action.style, (progress - 82) / 8)
             hand_x, hand_y = target["x"], target["y"]
             hand_z = _blend(carry_z, grasp_z, ratio)
         elif progress < 96:
             hand_x, hand_y, hand_z = target["x"], target["y"], grasp_z
         else:
-            ratio = (progress - 96) / 4
+            ratio = _style_easing(action.style, (progress - 96) / 4)
             hand_x = _blend(target["x"], home["x"], ratio)
             hand_y = _blend(target["y"], 0.16, ratio)
             hand_z = _blend(grasp_z, home["z"], ratio)
