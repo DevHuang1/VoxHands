@@ -16,90 +16,85 @@ TARGETS = {
     "left_place": {"label": "Left place", "arm": "left"},
     "right_place": {"label": "Right place", "arm": "right"},
     "center_place": {"label": "Center place", "arm": "left"},
+    "cup_interior": {"label": "Inside cup", "arm": "right", "container": "cup"},
+    "plate_surface": {"label": "On plate", "arm": "left", "container": "blue_plate"},
 }
-
-
-def _has_word(text: str, word: str) -> bool:
-    return re.search(rf"\b{re.escape(word)}\b", text) is not None
-
-
-def _object_mentions(text: str) -> list[str]:
-    found: list[str] = []
-    for object_id, definition in OBJECTS.items():
-        if any(alias in text for alias in definition["aliases"]):
-            found.append(object_id)
-    return found
-
-
-def _target_for(object_id: str, text: str, index: int) -> str:
-    if object_id == "blue_plate" and _has_word(text, "left"):
-        return "left_place"
-    if object_id == "cup" and _has_word(text, "right"):
-        return "right_place"
-    if object_id in {"fork", "spoon"} and _has_word(text, "right"):
-        return "right_place"
-    if index == 0:
-        return "left_place"
-    if index == 1:
-        return "right_place"
-    return "center_place"
 
 
 def build_plan(raw_text: str) -> Plan:
     text = " ".join(raw_text.lower().strip().split())
-    if not text:
-        text = "set the table for two"
-
-    mentions = _object_mentions(text)
-    # Only use the demo's default pair for an explicit table-setting request.
-    # A command such as "place the red one" must not silently become a table
-    # setting plan merely because it contains the verb "place".
-    default_table_request = any(
-        phrase in text
-        for phrase in ("set the table", "set table", "arrange the table", "prepare the table", "table for")
-    )
-    if not mentions and default_table_request:
-        mentions = ["blue_plate", "cup"]
-
-    # Preserve a stable, demo-friendly order even if the sentence names the cup first.
-    preferred_order = ["blue_plate", "cup", "fork", "spoon"]
-    mentions = [object_id for object_id in preferred_order if object_id in mentions]
-    constraints: list[str] = []
-    if "red zone" in text or "red area" in text or "avoid red" in text:
-        constraints.append("avoid_red_zone")
-    if "do not collide" in text or "don't collide" in text or "no collision" in text:
-        constraints.append("no_arm_collision")
-    if not constraints:
-        constraints.append("no_arm_collision")
-
-    actions: list[Action] = []
-    for index, object_id in enumerate(mentions):
-        target_id = _target_for(object_id, text, index)
-        target = TARGETS[target_id]
-        action_arm = target["arm"]
-        if target_id == "center_place" and object_id in {"cup", "spoon"}:
-            action_arm = "right"
-        actions.append(
-            Action(
-                id=new_id("act"),
-                arm=action_arm,
-                object_id=object_id,
-                object_label=OBJECTS[object_id]["label"],
-                target_id=target_id,
-                target_label=target["label"],
-                note="Parallel-safe move" if index < 2 else "Queued after primary pair",
-            )
-        )
-
-    if "table" in text or "arrange" in text or "place" in text:
-        intent = "table_setting"
-    else:
-        intent = "object_placement"
-
-    return Plan(
-        id=new_id("plan"),
-        raw_text=raw_text.strip() or "Set the table for two",
-        intent=intent,
-        actions=actions,
-        constraints=constraints,
-    )
+    issues = []
+    actions = []
+    if re.fullmatch(r"(?:please )?home (?:both |the )?arms[.!]?", text):
+        return Plan(new_id("plan"), raw_text, "home", [], [])
+    if re.fullmatch(r"(?:show )?calibration(?: status)?[.!]?", text):
+        return Plan(new_id("plan"), raw_text, "calibration", [], [])
+    text = re.sub(r"\b(?:do not collide|don't collide|no collisions?)\b", "safely", text)
+    # Never execute a partial interpretation of negated or unknown instructions.
+    if re.search(r"\b(?:not|never|don't|except|instead)\b", text):
+        issues.append("Please use positive placement instructions; negation is ambiguous.")
+    aliases = {alias: oid for oid, obj in OBJECTS.items() for alias in obj["aliases"]}
+    pattern = r"\b(?:" + "|".join(sorted(aliases, key=len, reverse=True)) + r")\b"
+    matches = list(re.finditer(pattern, text))
+    source_matches = []
+    for match in matches:
+        prefix = text[max(0, match.start() - 16):match.start()]
+        if re.search(r"\b(?:into|inside|in|onto|on)\s+(?:the\s+)?$", prefix):
+            continue
+        source_matches.append(match)
+    matches = source_matches
+    table_request = bool(re.search(r"\b(?:set|arrange|prepare) (?:the )?table\b|\btable for", text))
+    destinations = {}
+    for index, match in enumerate(matches):
+        oid = aliases[match.group()]
+        end = matches[index+1].start() if index+1 < len(matches) else len(text)
+        clause = text[match.end():end]
+        found = set(re.findall(r"\b(left|right|center|centre|middle)\b", clause))
+        found = {"center" if side in {"centre", "middle"} else side for side in found}
+        for relation in re.finditer(r"\b(into|inside|in|onto|on)\s+(?:the\s+)?(" + pattern + r")", clause):
+            destination = aliases[relation.group(2)]
+            target_relation = "cup_interior" if destination == "cup" and relation.group(1) in {"into", "inside", "in"} else "plate_surface" if destination == "blue_plate" and relation.group(1) in {"on", "onto"} else None
+            if target_relation:
+                found.add(target_relation)
+            else:
+                issues.append(f"Unsupported placement: {OBJECTS[oid]['label']} {relation.group(1)} {OBJECTS[destination]['label']}.")
+        if len(found) > 1:
+            issues.append(f"Specify one destination for {OBJECTS[oid]['label']}.")
+        target = next(iter(found)) if len(found) == 1 and next(iter(found)) in TARGETS else next(iter(found)) + "_place" if len(found) == 1 else None
+        if oid in destinations and destinations[oid] != target:
+            issues.append(f"Conflicting destinations for {OBJECTS[oid]['label']}.")
+        destinations[oid] = target
+    if not matches and table_request:
+        destinations = {"blue_plate": "left_place", "cup": "right_place"}
+    # Residual nouns after placement verbs identify unsupported objects instead of
+    # silently executing the recognized subset of a compound instruction.
+    residual = re.sub(pattern, " object ", text)
+    allowed = set("please set arrange prepare the table for two put place move pick up grab lift a an object on to in into inside at left right center centre middle target place and then both avoid red zone area no collision do collide safely with arms arm".split())
+    unknown = sorted(set(re.findall(r"[a-z]+", residual)) - allowed)
+    unknown = [word for word in unknown if word != "onto"]
+    if unknown:
+        issues.append("Unrecognized wording: " + ", ".join(unknown) + ". Use 'Place the cup on the right'.")
+    if re.search(r"(?:pick|grab|lift|move|place|put).*\bred (?:one|item|barrier|object)", text):
+        issues.append("The red item is the no-go safety barrier and cannot be picked up.")
+    missing = [oid for oid, target in destinations.items() if target is None]
+    suggestions = []
+    if len(missing) == 1 and not issues and not table_request:
+        oid = missing[0]
+        for side in ("left", "center", "right"):
+            if side + "_place" in destinations.values():
+                continue
+            clauses = [f"Place the {OBJECTS[obj]['label']} on the {(target or side + '_place').removesuffix('_place')}" for obj, target in destinations.items()]
+            suggestions.append({"label": f"{OBJECTS[oid]['label']} to {side}", "text": ". ".join(clauses) + "."})
+    for index, (oid, target) in enumerate(destinations.items()):
+        if target is None:
+            if table_request:
+                target = ["left_place", "right_place", "center_place"][min(index, 2)]
+            else:
+                issues.append(f"Where should {OBJECTS[oid]['label']} go: left, right, or center?")
+                continue
+        arm = TARGETS[target]["arm"]
+        if target == "center_place" and oid in {"cup", "spoon"}:
+            arm = "right"
+        actions.append(Action(new_id("act"), arm, oid, OBJECTS[oid]["label"], target, TARGETS[target]["label"], duration_ms=5000))
+    return Plan(new_id("plan"), raw_text, "table_setting" if table_request else "object_placement", actions,
+                ["avoid_red_zone", "no_arm_collision"], safety_issues=issues, recognized_objects=[OBJECTS[oid]["label"] for oid in destinations], suggestions=suggestions)

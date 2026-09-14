@@ -12,7 +12,8 @@ def openvino_status() -> dict[str, Any]:
         return {
             "name": "OpenVINO",
             "available": True,
-            "mode": "hardware-aware",
+            "active": False,
+            "mode": "Runtime detected; inference adapter not implemented",
             "version": getattr(ov, "__version__", "installed"),
             "devices": devices,
             "accelerators": accelerators,
@@ -21,7 +22,8 @@ def openvino_status() -> dict[str, Any]:
         return {
             "name": "OpenVINO",
             "available": False,
-            "mode": "demo fallback",
+            "active": False,
+            "mode": "Optional runtime unavailable; keyword planner active",
             "version": None,
             "devices": [],
             "accelerators": [],
@@ -43,7 +45,8 @@ def speechmatics_status() -> dict[str, Any]:
         "available": package_available and has_key,
         "package_available": package_available,
         "credentials_configured": has_key,
-        "mode": "realtime adapter ready" if package_available and has_key else "demo transcript",
+        "active": False,
+        "mode": "Package and credentials detected; transcription adapter not implemented" if package_available and has_key else "Browser speech or typed input; server transcription not connected",
     }
 
 
@@ -51,6 +54,7 @@ def runtime_status() -> dict[str, Any]:
     return {
         "openvino": openvino_status(),
         "speechmatics": speechmatics_status(),
-        "simulator": {"name": "VoxHands deterministic simulator", "available": True},
+        "robotics": {"name": "MuJoCo / LeRobot", "available": False, "active": False, "mode": "Robot execution adapter not implemented"},
+        "simulator": {"name": "VoxHands deterministic simulator", "available": True, "active": True, "mode": "Deterministic simulation; no physical hardware"},
     }
 
