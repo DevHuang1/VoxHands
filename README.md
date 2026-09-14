@@ -4,6 +4,12 @@ VoxHands is a voice-first dual-arm tabletop assistant demo. It combines a
 Python planner and deterministic simulator with an industrial-style browser
 workcell dashboard.
 
+VoxHands is currently positioned as a summit-ready constrained Physical AI
+demo: Groq interprets language and requests validated workcell tools, while the
+local simulator remains authoritative for physics, safety, state, and motion.
+This demonstrates agentic control infrastructure without claiming direct
+control of a real robot or arbitrary physics mutation.
+
 The demo includes:
 
 - Structured natural-language command parsing.
@@ -29,8 +35,8 @@ Requirements:
 The core MVP has no required third-party Python packages:
 
 ```bash
-cd E:\hackathon\VoxHands
-python run.py
+cd /path/to/VoxHands
+python3 run.py
 ```
 
 Open <http://127.0.0.1:8000/>. Keep the page on the HTTP server URL; opening
@@ -86,6 +92,24 @@ Useful controls in the dashboard:
 - `Test contact` injects a local cup/barrier contact for telemetry testing.
 - `Top`, `Operator`, and `Reset view` change the 3D camera.
 
+### Suggested summit demo flow
+
+Run these short scenarios in order:
+
+1. **Successful tool execution:** `Move the blue plate to the center.` Show
+   Groq's selected tool, the server-side plan, the 60 Hz arm motion, and the
+   final target lock.
+2. **Bounded hand control:** `Move the empty left arm to x .30 y .30 z .20,
+   then close the gripper.` Show that manual arm and gripper requests stay
+   inside validated workcell bounds.
+3. **Safety refusal:** `Move the blue plate to the ground.` Show that the
+   unsupported destination is blocked without changing the object or starting
+   motion.
+
+The useful infrastructure story is the trace across all three cases:
+`language intent -> Groq tool call -> tool boundary -> safety validator ->
+authoritative simulator state -> browser telemetry`.
+
 The visible red item is the no-go safety barrier. It is not a grippable
 object. A request such as `Pick up the red one and place it on the left.` is
 blocked rather than silently converted into the default table-setting task.
@@ -138,6 +162,18 @@ An example styled request:
 gently place the cup on the right and the plate on the left, then wave
 ```
 
+When Groq is configured, `/api/command` runs a bounded local tool loop. Groq
+can observe the authoritative workcell, execute validated placements, move an
+empty arm within the workcell bounds, open or close an empty gripper, home the
+arms, wait for settling, and pause/resume/stop/reset the simulator. It cannot
+write arbitrary object poses, bypass the red barrier, inject browser physics
+status, or execute raw code. The server remains authoritative and the browser
+Rapier3D layer remains telemetry and contact validation.
+
+The tool loop is intentionally slower than physics: the simulator continues at
+60 Hz while Groq makes bounded decisions and receives compact state results.
+This keeps language-model latency out of the hand trajectory controller.
+
 ## How the system works
 
 ```text
@@ -147,7 +183,11 @@ Browser command
 POST /api/command
       |
       v
-Python planner -> safety validator -> deterministic simulator
+Groq tool loop -> tool boundary -> safety validator -> deterministic simulator
+      |                         |
+      |                         +--> bounded arm/gripper controls
+      v
+  compact state and physics results returned for replanning
                                       |
                                       v
                               GET /api/state
@@ -201,7 +241,8 @@ The local server exposes these endpoints:
 | `GET` | `/api/health` | Basic service health check. |
 | `GET` | `/api/state` | Current plan, objects, arms, motion, physics, events, and runtime status. |
 | `POST` | `/api/plan` | Validate and preview a command without starting a run. |
-| `POST` | `/api/command` | Submit `{"text":"...", "style?":"", "gesture?":""}` for planning and execution. Conversational intents return an AI reply without starting motion. |
+| `POST` | `/api/command` | Submit `{"text":"...", "style?":"", "gesture?":""}` for Groq tool control when configured, with deterministic planning fallback. |
+| `POST` | `/api/agent` | Explicit alias for the bounded Groq workcell tool loop. |
 | `POST` | `/api/chat` | Submit `{"text":"..."}` and get an AI reply only; never starts a motion run. |
 | `POST` | `/api/control` | Submit `{"action":"pause"}`, `resume`, or `stop`. |
 | `POST` | `/api/reset` | Reset the deterministic simulator and return the new state. |
@@ -244,6 +285,7 @@ runtime.txt               Render Python version pin (3.11.9)
 requirements.txt          Empty on purpose; VoxHands is standard-library-only
 voxhands/planner.py       Keyword command parsing and arm/target assignment
 voxhands/groq.py          Groq LLM client, system prompt, and AI plan builder
+voxhands/agent.py         Bounded Groq tool definitions, loop, and dispatcher
 voxhands/styles.py        Movement-style registry, easing, and gesture keyframes
 voxhands/safety.py        Plan validation and red-zone safety rules
 voxhands/simulation.py    Deterministic 60 Hz server-side task simulation
@@ -252,6 +294,7 @@ voxhands/models.py        Plan, action, and snapshot data models
 voxhands/integrations.py  Optional runtime availability detection
 frontend/index.html       Dashboard, Three.js scene, and Rapier3D physics
 tests/                    Keyword, AI, simulation, and API-contract tests
+LICENSE                   MIT license for VoxHands source code
 ```
 
 ## Verification
@@ -259,11 +302,16 @@ tests/                    Keyword, AI, simulation, and API-contract tests
 Run the Python tests and static checks from the repository root:
 
 ```bash
-python -m unittest discover -s tests -v
-python -m compileall -q voxhands tests
+python3 -m unittest discover -s tests -v
+python3 -m compileall -q voxhands tests
 node -e 'const fs=require("fs"); const html=fs.readFileSync("frontend/index.html","utf8"); const scripts=html.split("<script>")[1].split("</script>")[0]; new Function(scripts); console.log("frontend JavaScript syntax OK");'
 git diff --check
 ```
+
+The full regression suite includes planner, safety, simulator, Groq, agent,
+and HTTP contract tests. A recent run completed with 54 passing tests. For the
+summit demo, also perform the browser checklist below after starting the live
+server; backend tests alone do not prove the rendered WebGL interaction.
 
 For a live browser check, verify all of the following:
 
@@ -301,9 +349,9 @@ the laptop is connected to hardware or an NPU.
 
 The intended next step is to replace `TableSettingSimulation` with the
 Intel-provided MuJoCo/LeRobot backend while preserving the existing plan,
-safety, HTTP, and browser telemetry contracts. Groq conversational planning is
-implemented and gated on `GROQ_API_KEY`; free-form model output still produces
-intent and action structure only, never raw motor commands.
+safety, HTTP, and browser telemetry contracts. Groq tool control is gated on
+`GROQ_API_KEY`; the model can request only validated workcell tools, never raw
+motor commands or arbitrary physics mutation.
 
 ## Improved command and execution behavior
 
@@ -354,3 +402,9 @@ Container actions are supported explicitly: `Put the spoon into the cup` creates
 one `spoon -> cup_interior` action, tracks the cup's live position, lowers the
 spoon above the cup base, and records `container: "cup"` only after release.
 The cup itself cannot be selected as its own container destination.
+
+## License
+
+VoxHands source code is available under the [MIT License](LICENSE). Vendored
+third-party modules retain their own licenses; see the license files beside the
+modules in `frontend/vendor`.

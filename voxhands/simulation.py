@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from .integrations import runtime_status
-from .models import Plan, utc_now
+from .models import Plan, new_id, utc_now
 from .planner import TARGETS, build_plan
 from .safety import validate_plan
 from .styles import GESTURES, STYLES, easing as _style_easing, trajectory_offset
@@ -149,6 +149,21 @@ class TableSettingSimulation:
                 "grasp_attempts": 0,
                 "smoothness_max_step_mm": 0.0,
             }
+            self.manual_arms = {
+                arm: {
+                    "x": values["x"],
+                    "y": values["y"],
+                    "z": values["z"],
+                    "angle": values["angle"],
+                    "target": None,
+                    "active": False,
+                    "manual_used": False,
+                    "gripper": "open",
+                    "grip_aperture": 0.20,
+                }
+                for arm, values in ARM_HOME.items()
+            }
+            self._manual_tokens = {"left": 0, "right": 0}
             self._append_event("system", "VoxHands simulator ready. Both hands are parked.")
 
     def _append_event(self, kind: str, message: str) -> None:
@@ -319,11 +334,133 @@ class TableSettingSimulation:
                 self._append_event("safety", "All motion stopped by operator. Reset before starting another run.")
             return self.snapshot()
 
+    def move_arm(self, arm: str, x: float, y: float, z: float, duration_ms: int = 1000, angle: float | None = None) -> dict[str, Any]:
+        """Move one unassigned arm through a bounded manual trajectory."""
+        arm = str(arm).strip().lower()
+        if arm not in ARM_HOME:
+            return {"error": "Arm must be left or right."}
+        try:
+            coordinates = {"x": float(x), "y": float(y), "z": float(z)}
+            duration = int(duration_ms)
+            target_angle = float(angle) if angle is not None else float(ARM_HOME[arm]["angle"])
+        except (TypeError, ValueError):
+            return {"error": "Arm coordinates, angle, and duration must be numeric."}
+        if not all(math.isfinite(value) for value in (*coordinates.values(), target_angle)):
+            return {"error": "Arm coordinates must be finite."}
+        if not (0.02 <= coordinates["x"] <= 0.98 and 0.02 <= coordinates["y"] <= 0.98 and 0.08 <= coordinates["z"] <= 0.80):
+            return {"error": "Arm target is outside the safe workcell bounds."}
+        duration = max(100, min(15_000, duration))
+        target_angle = max(-90.0, min(90.0, target_angle))
+        with self._lock:
+            if self.status in {"running", "paused", "stopped"}:
+                return {"error": "Manual arm control is unavailable while a task is active; stop and reset first."}
+            current = self.manual_arms[arm]
+            self._manual_tokens[arm] += 1
+            token = self._manual_tokens[arm]
+            current["target"] = {**coordinates, "angle": target_angle, "duration_ms": duration}
+            current["active"] = True
+            current["manual_used"] = True
+            self.motion["phase"] = "manual"
+            self.motion["updated_at"] = utc_now()
+            self._append_event("control", f"Groq manual control moving the {arm} arm to a bounded target.")
+            threading.Thread(target=self._execute_manual_arm, args=(arm, token), daemon=True).start()
+            return self.snapshot()
+
+    def _execute_manual_arm(self, arm: str, token: int) -> None:
+        started = time.perf_counter()
+        with self._lock:
+            target = copy.deepcopy(self.manual_arms[arm]["target"])
+            start = {key: self.manual_arms[arm][key] for key in ("x", "y", "z", "angle")}
+        if not target:
+            return
+        duration = target["duration_ms"] / 1000
+        while True:
+            progress = min(1.0, (time.perf_counter() - started) / duration)
+            eased = minimum_jerk(progress)
+            with self._lock:
+                if token != self._manual_tokens[arm]:
+                    return
+                current = self.manual_arms[arm]
+                for key in ("x", "y", "z", "angle"):
+                    current[key] = round(start[key] + (target[key] - start[key]) * eased, 5)
+                self.motion["revision"] += 1
+                self.motion["phase"] = "manual" if progress < 1 else "parked"
+                self.motion["updated_at"] = utc_now()
+                if progress >= 1:
+                    current["active"] = False
+                    current["target"] = None
+                    self._append_event("control", f"Groq manual control parked the {arm} arm at its requested pose.")
+                    return
+            time.sleep(SIM_DT)
+
+    def set_gripper(self, arm: str, action: str, aperture: float | None = None) -> dict[str, Any]:
+        """Set a free arm's simulated gripper without bypassing object authority."""
+        arm = str(arm).strip().lower()
+        action = str(action).strip().lower()
+        if arm not in ARM_HOME:
+            return {"error": "Arm must be left or right."}
+        if action not in {"open", "close"}:
+            return {"error": "Gripper action must be open or close."}
+        try:
+            value = 0.20 if aperture is None else float(aperture)
+        except (TypeError, ValueError):
+            return {"error": "Gripper aperture must be numeric."}
+        if not math.isfinite(value) or not 0.04 <= value <= 0.30:
+            return {"error": "Gripper aperture must be between 0.04 and 0.30."}
+        with self._lock:
+            if self.status in {"running", "paused", "stopped"}:
+                return {"error": "Manual gripper control is unavailable while a task is active; stop and reset first."}
+            state = self.manual_arms[arm]
+            state["gripper"] = "closed" if action == "close" else "open"
+            state["grip_aperture"] = value if action == "open" else min(value, 0.14)
+            state["manual_used"] = True
+            self._append_event("control", f"Groq manual control set the {arm} gripper to {action}.")
+            return self.snapshot()
+
+    def home_arms(self) -> dict[str, Any]:
+        """Return both free arms to their bounded home poses."""
+        with self._lock:
+            if self.status in {"running", "paused", "stopped"}:
+                return {"error": "Home control is unavailable while a task is active; stop and reset first."}
+        self.set_gripper("left", "open")
+        self.set_gripper("right", "open")
+        left = self.move_arm("left", **{key: ARM_HOME["left"][key] for key in ("x", "y", "z")}, duration_ms=700, angle=ARM_HOME["left"]["angle"])
+        right = self.move_arm("right", **{key: ARM_HOME["right"][key] for key in ("x", "y", "z")}, duration_ms=700, angle=ARM_HOME["right"]["angle"])
+        return right if "error" not in right else left
+
     def reply(self, raw_text: str, reply_text: str, provider: str, suggestions: list | None = None) -> dict[str, Any]:
         """Surface an AI natural-language reply without starting a motion run."""
         with self._lock:
             self.transcript = {"text": raw_text, "status": "final", "source": provider, "reply": reply_text, "suggestions": suggestions or []}
             self._append_event("ai", f"{provider or 'AI'} · {reply_text}")
+            return self.snapshot()
+
+    def set_ai_reply(self, reply_text: str, provider: str = "groq") -> dict[str, Any]:
+        """Attach the final agent response to the current run without changing authority."""
+        with self._lock:
+            if self.plan:
+                self.plan.llm_reply = reply_text
+                self.plan.llm_provider = provider
+            self.transcript["reply"] = reply_text
+            self.transcript["source"] = provider
+            if reply_text:
+                self._append_event("ai", f"{provider} · {reply_text}")
+            return self.snapshot()
+
+    def block_request(self, raw_text: str, issue: str, reply: str = "", provider: str = "groq") -> dict[str, Any]:
+        """Record a rejected request without mutating object or arm motion."""
+        with self._lock:
+            if self.status in {"running", "paused"}:
+                return {"error": "Finish or stop the active run before submitting another request."}
+            plan = Plan(new_id("plan"), raw_text, "object_placement", [], ["avoid_red_zone", "no_arm_collision"], safety_issues=[issue])
+            plan.status = "blocked"
+            plan.llm_provider = provider
+            plan.mode = "command"
+            plan.llm_reply = reply
+            self.plan = plan
+            self.status = "blocked"
+            self.transcript = {"text": raw_text, "status": "final", "source": provider, "reply": reply}
+            self._append_event("safety", "Command blocked: " + issue)
             return self.snapshot()
 
     def _phase_for(self, progress: float) -> str:
@@ -647,12 +784,23 @@ class TableSettingSimulation:
 
     def _arm_view(self, arm: str) -> dict[str, Any]:
         home = ARM_HOME[arm]
+        manual = self.manual_arms[arm]
         parked = {
             "status": self._arm_status(arm), "phase": "parked", "x": home["x"], "y": home["y"], "z": home["z"],
             "angle": home["angle"], "progress": 0, "gripper": "open", "grip_aperture": 0.20,
             "holding": None, "grasp_confirmed": False, "grasp_target": None,
             "pose": {"x": home["x"], "y": home["y"], "z": home["z"], "yaw": home["angle"]},
         }
+        if (not self.plan or self.status not in {"running", "paused", "stopped"}) and manual["manual_used"]:
+            return {
+                "status": "manual" if manual["active"] else "parked",
+                "phase": "manual" if manual["active"] else "parked",
+                "x": round(manual["x"], 5), "y": round(manual["y"], 5), "z": round(manual["z"], 5),
+                "angle": round(manual["angle"], 3), "progress": 0,
+                "gripper": manual["gripper"], "grip_aperture": round(manual["grip_aperture"], 5),
+                "holding": None, "grasp_confirmed": False, "grasp_target": None,
+                "pose": {"x": round(manual["x"], 5), "y": round(manual["y"], 5), "z": round(manual["z"], 5), "yaw": round(manual["angle"], 3)},
+            }
         if not self.plan or self.status not in {"running", "paused", "stopped"}:
             return parked
         gesture_pose = self._gesture_pose(arm)

@@ -122,14 +122,17 @@ class GroqClient:
             "fallback_model": self.fallback_model if configured else None,
         }
 
-    def _complete(
+    def _request_payload(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
+        *,
+        model: str | None = None,
         temperature: float = 0.3,
         max_tokens: int = 1200,
         json_mode: bool = True,
-        model: str | None = None,
-    ) -> str:
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if not self.available:
             raise RuntimeError("GROQ_API_KEY is not configured.")
         body: dict[str, Any] = {
@@ -138,7 +141,11 @@ class GroqClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        if json_mode:
+        if tools:
+            body["tools"] = tools
+            if tool_choice is not None:
+                body["tool_choice"] = tool_choice
+        elif json_mode:
             body["response_format"] = {"type": "json_object"}
         request = urllib.request.Request(
             GROQ_ENDPOINT,
@@ -156,7 +163,45 @@ class GroqClient:
         except urllib.error.HTTPError as error:
             message = error.read().decode("utf-8", "replace")[:300]
             raise RuntimeError(f"Groq API error {error.code}: {message}") from error
-        return str(payload["choices"][0]["message"]["content"])
+        if not isinstance(payload, dict):
+            raise ValueError("Groq returned a non-object response.")
+        return payload
+
+    def _complete(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.3,
+        max_tokens: int = 1200,
+        json_mode: bool = True,
+        model: str | None = None,
+    ) -> str:
+        payload = self._request_payload(
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+        )
+        return str(payload["choices"][0]["message"].get("content") or "")
+
+    def tool_complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
+        """Request a tool-capable response, trying the configured model pair."""
+        errors: list[str] = []
+        models = list(dict.fromkeys((self.model, self.fallback_model)))
+        for model in models:
+            try:
+                return self._request_payload(
+                    messages,
+                    model=model,
+                    temperature=0.1,
+                    max_tokens=1200,
+                    json_mode=False,
+                    tools=tools,
+                    tool_choice="auto",
+                )
+            except Exception as error:
+                errors.append(f"{model}: {error}")
+        raise RuntimeError("Groq tool request failed for all configured models. " + " | ".join(errors))
 
     def parse_command(self, text: str) -> dict[str, Any]:
         messages = [

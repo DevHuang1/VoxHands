@@ -13,6 +13,7 @@ from .simulation import TableSettingSimulation
 from .planner import build_plan
 from .safety import validate_plan
 from .groq import GroqClient, ai_build_plan
+from .agent import run_agent
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -85,7 +86,7 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
             self._json({"error": str(error)}, 400)
 
     def _post(self) -> None:
-        if self.path == "/api/command":
+        if self.path in {"/api/command", "/api/agent"}:
             payload = self._read_json()
             text = payload.get("text", "")
             if not isinstance(text, str):
@@ -96,6 +97,15 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
                 return
             style = payload.get("style") if isinstance(payload.get("style"), str) else None
             gesture = payload.get("gesture") if isinstance(payload.get("gesture"), str) else None
+            if self.groq.available:
+                try:
+                    result = run_agent(text, self.simulation, self.groq, style=style, gesture=gesture)
+                    self._json(result)
+                    return
+                except Exception:
+                    # Preserve the deterministic command path if the remote
+                    # model or tool-call response is temporarily unavailable.
+                    pass
             plan, reply = ai_build_plan(text, self.groq, style=style, gesture=gesture)
             if plan.mode == "conversation":
                 self._json(self.simulation.reply(text, reply, plan.llm_provider, suggestions=plan.suggestions))
