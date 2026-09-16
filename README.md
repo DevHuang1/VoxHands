@@ -98,6 +98,14 @@ Deploy with the included blueprint:
 4. Keep `HOST`/`PORT` defaults: the server binds `0.0.0.0` and reads Render's
    `$PORT`. Health checks use `/api/health`.
 
+Render installs only `requirements.txt`, which is the standard library on
+purpose, so `mujoco`, `openvino`, and `Pillow` are absent. The server detects
+that at startup and falls back to the pure-Python simulation: `/api/camera` and
+`/api/vision` return `unavailable`, while the browser-side Three.js/Rapier
+workcell keeps the dashboard fully interactive. Add the optional packages to
+`requirements.txt` if you want the MuJoCo renderer on Render (it needs a larger
+instance).
+
 The server honors `Ctrl+C` locally and handles Render's `SIGTERM` gracefully.
 Free-tier instances can sleep after idle; a cold start can take about a minute
 before the first request wakes the service.
@@ -351,7 +359,8 @@ scripts/quantize_openvino.py   NNCF INT8 post-training quantization of the IR
 scripts/benchmark_openvino.py  Measured OpenVINO CPU latency/throughput (FP32 vs INT8)
 scripts/train_policy.py        Train/emit data/policy.json on synthetic demos
 frontend/index.html       Dashboard, Three.js scene, and Rapier3D physics
-tests/                    Keyword, AI, simulation, IR-export, and API-contract tests
+video/                    Remotion project that renders the demo video (npm run render)
+tests/                    Keyword, AI, simulation, IR-export, deploy-boot, and API-contract tests
 LICENSE                   MIT license for VoxHands source code
 ```
 
@@ -368,10 +377,10 @@ git diff --check
 
 The full regression suite includes planner, safety, simulator, Groq, agent,
 HTTP contract, MuJoCo robustness, policy, OpenVINO IR-export, INT8-quantization,
-benchmark/sweep, and throughput tests. A recent run completed with 98 passing
-tests. For the summit demo, also perform the browser checklist below after
-starting the live server; backend tests alone do not prove the rendered WebGL
-interaction.
+benchmark/sweep, throughput, and backend-free deploy-boot tests. A recent run
+completed with 99 passing tests. For the summit demo, also perform the browser
+checklist below after starting the live server; backend tests alone do not prove
+the rendered WebGL interaction.
 
 For a live browser check, verify all of the following:
 
