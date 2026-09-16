@@ -4,6 +4,14 @@ VoxHands is a voice-first dual-arm tabletop assistant demo. It combines a
 Python planner and deterministic simulator with an industrial-style browser
 workcell dashboard.
 
+**Live demo:** <https://voxhands.onrender.com/> — deployed on Render's free
+tier, which sleeps when idle; the first request can take about a minute to wake.
+
+**Submission materials:** [slide deck](submission/VoxHands-deck.pdf) ·
+[cover image](submission/cover.png) ·
+[project descriptions](submission/description.md) ·
+demo video (`VoxHands_demo_1080p.mp4`, 115 s, 1920×1080).
+
 VoxHands is currently positioned as a summit-ready constrained Physical AI
 demo: Groq interprets language and requests validated workcell tools, while the
 local simulator remains authoritative for physics, safety, state, and motion.
@@ -358,8 +366,10 @@ scripts/convert_openvino.py    Export the policy MLP to a real OpenVINO IR (.xml
 scripts/quantize_openvino.py   NNCF INT8 post-training quantization of the IR
 scripts/benchmark_openvino.py  Measured OpenVINO CPU latency/throughput (FP32 vs INT8)
 scripts/train_policy.py        Train/emit data/policy.json on synthetic demos
+scripts/build_deck.py          Render the slide deck PDF + cover from the Remotion sources
 frontend/index.html       Dashboard, Three.js scene, and Rapier3D physics
 video/                    Remotion project that renders the demo video (npm run render)
+submission/               Deck PDF, 16:9 cover, live demo screenshots, and submission copy
 tests/                    Keyword, AI, simulation, IR-export, deploy-boot, and API-contract tests
 LICENSE                   MIT license for VoxHands source code
 ```
@@ -566,6 +576,62 @@ Container actions are supported explicitly: `Put the spoon into the cup` creates
 one `spoon -> cup_interior` action, tracks the cup's live position, lowers the
 spoon above the cup base, and records `container: "cup"` only after release.
 The cup itself cannot be selected as its own container destination.
+
+## Business value, market, and competition
+
+VoxHands is infrastructure for teams that need to put language models near
+physical hardware without giving them direct control of it. The product is the
+bounded, auditable layer in the middle: intent in, validated tool calls out.
+
+**Who it is for**
+
+- **Robotics integrators** building tabletop, kitchen, and warehouse cells that
+  need a validated command layer before the hardware exists.
+- **Physical-AI researchers** who need a reproducible, safe simulator to
+  evaluate policies without risking a real arm.
+- **Silicon and platform vendors** who need reference applications that
+  demonstrate inference optimization on their accelerators.
+
+**Revenue model**
+
+- **Open core** — the MIT simulator drives adoption; a paid tier adds multi-cell
+  management and hosted runs.
+- **Hosted simulation CI** — cloud workcell runs that regression-test policies
+  and tool loops on every commit.
+- **Optimization and integration services** — OpenVINO/NNCF tuning and hardware
+  bring-up engagements.
+
+**Competitive landscape**
+
+End-to-end vision-language-action policies are strong at perception but treat
+execution as an implementation detail. VoxHands inverts that: language proposes,
+deterministic code disposes. The table below summarizes the difference against a
+typical VLA demo in this space.
+
+| Capability | VoxHands | Typical VLA demo |
+| --- | --- | --- |
+| Intent vs execution | Split and enforced | End-to-end policy |
+| Refusal semantics | Explicit, blocks motion | Usually absent |
+| State authority | Server owns truth | Model output |
+| Accelerator claims | Verified or gated | Often unstated |
+
+Market figures in the slide deck are **illustrative and labelled as such** —
+they are shown so the assumptions can be challenged, not presented as verified
+market research.
+
+## Roadmap
+
+- **Now** — validated tool loop, authoritative simulator, real OpenVINO IR
+  export + NNCF INT8, and measured CPU inference.
+- **Next** — publish Intel Core Ultra NPU/GPU benchmarks, bring up real SO-101
+  hardware, and add closed-loop vision policies.
+- **Later** — a ROS 2 bridge, time-coordinated control, and hardware-partner
+  integrations.
+
+## Team
+
+- **Thu Ta Sitt** — Lead Developer
+- **Yan Myo Thuyako** — Software Engineer
 
 ## License
 
