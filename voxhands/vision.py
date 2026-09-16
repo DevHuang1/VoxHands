@@ -13,6 +13,7 @@ It exercises the same OpenVINO Runtime API the SO-101 hardware worker would use.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import numpy as np
@@ -49,6 +50,9 @@ class MujocoVision:
         self.last_frame: np.ndarray | None = None
         self.last_detections: list[dict[str, Any]] = []
         self.detector_name = "color-mask"
+        self.device_used: str | None = None
+        self.last_inference_ms: float | None = None
+        self.inference_calls = 0
 
     # ------------------------------------------------------------------ #
     # calibration: recover perceived object colours from the live camera
@@ -77,6 +81,7 @@ class MujocoVision:
             compiled = core.compile_model(ops.result(logits), device)
             pair = (core, compiled)
             self._pair = pair
+            self.device_used = device
             self.detector_name = f"openvino-mlp ({device})"
             return pair
         except Exception:
@@ -129,12 +134,15 @@ class MujocoVision:
         pair = self.openvino_pair()
         if pair is not None:
             _, compiled = pair
+            started = time.perf_counter()
+            calls = 0
             for detection in detections:
                 crop = self._crop_at(detection["x"], detection["y"], self.last_frame)
                 if crop is None:
                     continue
                 descriptor = np.asarray(crop.reshape(-1, 3).mean(axis=0) / 255.0, dtype=np.float32)[None, :]
                 logits = compiled([descriptor])[compiled.output(0)]
+                calls += 1
                 scores = np.asarray(logits).reshape(-1)
                 index = _FEATURE_ORDER.index(detection["object_id"])
                 confidence = float(scores[index])
@@ -143,6 +151,9 @@ class MujocoVision:
                 else:
                     detection["confidence"] = round(min(0.97, 0.2 + 0.8 * confidence / (1.0 + confidence)), 3)
                 detection["detector"] = self.detector_name
+            if calls:
+                self.last_inference_ms = round((time.perf_counter() - started) * 1000.0 / calls, 4)
+                self.inference_calls += calls
         self.last_detections = detections
         return detections
 
@@ -312,6 +323,9 @@ class MujocoVision:
         return {
             "source": "mujoco://overhead",
             "detector": self.detector_name,
+            "device": self.device_used,
+            "inference_ms": self.last_inference_ms,
+            "inference_calls": self.inference_calls,
             "objects_seen": [d["object_id"] for d in detections],
             "detections": detections,
             "openvino_ready": self.openvino_pair() is not None,

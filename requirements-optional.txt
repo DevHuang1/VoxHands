@@ -2,6 +2,7 @@
 # the MuJoCo physics + vision backend is preferred when `mujoco` is installed.
 openvino==2026.3.0
 openvino-genai==2026.3.0
+nncf>=2.19.0            # INT8 post-training quantization of the policy/vision IR (CPU)
 speechmatics-rt
 mujoco
 lerobot

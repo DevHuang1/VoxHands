@@ -20,6 +20,9 @@ The demo includes:
 - Rapier3D browser physics at a fixed 60 Hz for contact, grasp, release, and
   settling telemetry.
 - Timestamped minimum-jerk motion and a server-authoritative task status.
+- A real Intel OpenVINO path: the policy MLP is exported to a genuine
+  `.xml`/`.bin` IR, INT8-quantized with NNCF post-training quantization, and
+  benchmarked on CPU with measured latency/throughput (`scripts/`).
 - Honest runtime labels for optional OpenVINO, Speechmatics, MuJoCo, and
   LeRobot integrations.
 
@@ -125,10 +128,15 @@ Run these short scenarios in order:
 3. **Safety refusal:** `Move the blue plate to the ground.` Show that the
    unsupported destination is blocked without changing the object or starting
    motion.
+4. **Intel OpenVINO optimization:** run the export → quantize → benchmark
+   pipeline below and show the IR artifacts, the INT8 PTQ, and the measured CPU
+   latency/throughput on the actual compiled model. Point at `/api/vision`'s
+   `inference_ms`/`device` to show the live camera loop using the same runtime.
 
-The useful infrastructure story is the trace across all three cases:
+The useful infrastructure story is the trace across all four cases:
 `language intent -> Groq tool call -> tool boundary -> safety validator ->
-authoritative simulator state -> browser telemetry`.
+authoritative simulator state -> browser telemetry`, alongside a real
+`numpy weights -> OpenVINO IR -> NNCF INT8 -> measured CPU inference` path.
 
 The visible red item is the no-go safety barrier. It is not a grippable
 object. A request such as `Pick up the red one and place it on the left.` is
@@ -319,8 +327,15 @@ voxhands/assets/scene.xml MuJoCo workcell model (two SO-101-style arms, cameras)
 voxhands/server.py        Standard-library HTTP server and API routes
 voxhands/models.py        Plan, action, and snapshot data models
 voxhands/integrations.py  Optional runtime availability detection
+voxhands/openvino_adapter.py  OpenVINO IR export (to_ir), NNCF INT8 (quantize_ir), CPU benchmark
+voxhands/check_intel.py   CLI report of Intel OpenVINO GPU/NPU/CPU + NNCF status
+voxhands/policy/          Policy classes: MLPPolicy, CanonicalDinnerPolicy, synthetic demos
+scripts/convert_openvino.py    Export the policy MLP to a real OpenVINO IR (.xml/.bin)
+scripts/quantize_openvino.py   NNCF INT8 post-training quantization of the IR
+scripts/benchmark_openvino.py  Measured OpenVINO CPU latency/throughput (FP32 vs INT8)
+scripts/train_policy.py        Train/emit data/policy.json on synthetic demos
 frontend/index.html       Dashboard, Three.js scene, and Rapier3D physics
-tests/                    Keyword, AI, simulation, and API-contract tests
+tests/                    Keyword, AI, simulation, IR-export, and API-contract tests
 LICENSE                   MIT license for VoxHands source code
 ```
 
@@ -336,7 +351,8 @@ git diff --check
 ```
 
 The full regression suite includes planner, safety, simulator, Groq, agent,
-and HTTP contract tests. A recent run completed with 54 passing tests. For the
+HTTP contract, MuJoCo robustness, policy, OpenVINO IR-export, INT8-quantization,
+and benchmark tests. A recent run completed with 95 passing tests. For the
 summit demo, also perform the browser checklist below after starting the live
 server; backend tests alone do not prove the rendered WebGL interaction.
 
@@ -362,6 +378,7 @@ environment and pin the versions there:
 mujoco                 # MuJoCo physics + per-frame rendering (recommended backend)
 openvino==2026.3.0     # optional vision inference (NPU/GPU/CPU)
 openvino-genai==2026.3.0
+nncf>=2.19.0           # INT8 post-training quantization of the policy/vision IR (CPU)
 speechmatics-rt
 lerobot
 ```
@@ -384,6 +401,79 @@ camera frames; when the optional OpenVINO package is installed it runs a
 tracks the four objects. Groq tool control remains gated on `GROQ_API_KEY` and
 the model can request only validated workcell tools, never raw motor commands
 or arbitrary physics mutation.
+
+## Intel OpenVINO optimization path (IR export, INT8 PTQ, measured CPU inference)
+
+The policy MLP and the vision classifier run through a real Intel OpenVINO
+pipeline, not a numpy stand-in. The optimization flow is reproducible end to end
+on CPU:
+
+```bash
+python3.13 scripts/train_policy.py        # -> data/policy.json (auto-created if missing)
+python3.13 scripts/convert_openvino.py    # -> data/openvino_ir/policy_mlp.xml + .bin  (real IR)
+python3.13 scripts/quantize_openvino.py   # -> data/openvino_ir_int8/policy_mlp_int8.xml + .bin (NNCF PTQ)
+python3.13 scripts/benchmark_openvino.py  # -> p50/p95 latency, throughput, size, precision (FP32 vs INT8)
+```
+
+What each stage actually does:
+
+- **IR export** (`OpenVINOAdapter.to_ir`): builds the MLP as an `openvino.Model`
+  with `opset14` and writes a genuine `.xml`/`.bin` via `openvino.save_model`.
+  The same graph is compiled in-process by `MujocoVision` for the camera loop.
+- **INT8 PTQ** (`quantize_ir`): NNCF post-training quantization of the IR with a
+  calibration set sampled from the policy input distribution, producing a real
+  quantized IR. Quantization runs on CPU; no Intel GPU/NPU is required.
+- **Benchmark** (`benchmark_inference`): times the **compiled OpenVINO model**
+  (not the numpy fallback) and reports mean/p50/p95 latency, throughput, artifact
+  size, and the runtime inference precision. `/api/vision` surfaces the measured
+  per-detection `inference_ms` and `device` from the live camera loop.
+
+Representative numbers measured on this host (Apple CPU, OpenVINO 2026.3.1,
+FP16 inference hint), 8→16→16→8 policy MLP:
+
+| Artifact | .bin size | Latency mean | p50 | p95 |
+| --- | --- | --- | --- | --- |
+| FP32 IR | ~1.0 KiB | ~0.02 ms | ~0.02 ms | ~0.02 ms |
+| INT8 IR (NNCF PTQ) | ~0.7 KiB | ~0.02 ms | ~0.02 ms | ~0.03 ms |
+
+Honest caveat: at this model scale INT8 weight compression roughly halves the
+`.bin` but does **not** reduce latency on this CPU (dispatch overhead dominates a
+20 µs inference), so no speedup is claimed. The deliverable is the reproducible
+export → quantize → measure pipeline with truthful numbers, and the finding that
+model inference (~20 µs) is negligible against the 60 Hz (16.7 ms) physics tick.
+
+What is verified vs. gated:
+
+- **Verified**: `openvino` 2026.3.1 imports; real `.xml`/`.bin` IR export;
+  `compile_model` CPU inference; NNCF INT8 PTQ; measured CPU latency/throughput.
+- **Gated, NOT verified**: GPU inference, NPU inference, and GPU/NPU INT8 kernels.
+  On this Apple host `ov.Core().available_devices` returns `['CPU']`, so
+  `verified` is `False`, `device_used` is `"CPU"`, and no GPU/NPU numbers are
+  fabricated.
+
+`OpenVINOAdapter` (in `voxhands/openvino_adapter.py`) is the single honest source
+for this state. Its `convert()` method remains an optional ONNX-free numpy
+fallback (`weights.npz` + JSON manifest) and does **not** emit an IR — use
+`to_ir()` for the real artifact. `voxhands/vision.py` compiles the classifier
+graph in-process and reports measured `inference_ms` through `/api/vision`.
+
+Robustness harness status on this host (2 perturbed scenes each, from
+`scripts/run_mujoco_eval.py`):
+
+| Mode | Seeds | Seeds OK | All OK |
+| --- | --- | --- | --- |
+| Oracle (simulator ground truth) | 2 | 2 | true |
+| Vision (overhead-camera loop) | 2 | 2 | true |
+
+Check the same state from the CLI at any time:
+
+```bash
+python3.13 voxhands/check_intel.py
+python3.13 scripts/check_intel.py
+python3.13 scripts/convert_openvino.py
+python3.13 scripts/quantize_openvino.py
+python3.13 scripts/benchmark_openvino.py
+```
 
 ## Improved command and execution behavior
 

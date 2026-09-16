@@ -52,6 +52,8 @@ REACH_Z_TABLE = 0.05  # typical grasp/place servo height above the table top
 REACH_SAMPLE_STEP = 0.03
 DRAWER_INTERIOR_MIN = (0.46, 0.96)  # recessed front of the open drawer
 DRAWER_INTERIOR_MAX = (0.54, 1.04)
+CAMERA_TOL_M = 0.12  # max allowed detection-vs-ground-truth offset (metres)
+SILVERWARE_OFFSET_M = 0.03  # half-gap between spoon and fork in drawer
 
 
 @dataclass
@@ -143,28 +145,79 @@ def robust_eval(
     }
 
 
+def _silverware_targets(env: DinnerTableWorkcell) -> tuple[tuple[float, float], tuple[float, float]]:
+    draw = env._drawer_bounds()
+    cx = (draw["x0"] + draw["x1"]) / 2
+    cy = (draw["y0"] + draw["y1"]) / 2
+    return (cx, cy - SILVERWARE_OFFSET_M), (cx, cy + SILVERWARE_OFFSET_M)
+
+
 def _evaluate_seed(env: DinnerTableWorkcell, seed: int, oracle: bool) -> SeedEvaluation:
     started = time.perf_counter()
     ev = SeedEvaluation(seed=seed, oracle=oracle)
-    centres = {arm: _reachable_centres(env, arm) for arm in ("left", "right")}
-    goals = _goal_plan(env, centres)
-    sequence = _canonical_goals(env, goals)
-    for oid, (arm, target_name) in goals.items():
-        if target_name is None:
-            continue
-        name = f"place_{oid}"
 
-        res = env.place(arm, oid, (target_name[0], target_name[1]))
+    def rec(name: str, res: PrimitiveResult) -> PrimitiveResult:
         ev.steps.append(
-            {
-                "name": name,
-                "ok": bool(res.success),
-                "duration_s": res.duration_s,
-                "message": res.message,
-            }
+            {"name": name, "ok": bool(res.success), "duration_s": res.duration_s, "message": res.message}
         )
         if not res.success:
             ev.failures.append(f"{name}: {res.message}")
+        return res
+
+    if not oracle:
+        obs = env.observe()
+        det_map: dict[str, dict[str, Any]] = {d["object_id"]: d for d in obs["objects_seen"]}
+        gt = obs["object_states"]
+        all_ids = set(OBJECT_REGISTRY.keys())
+        missing = all_ids - set(det_map.keys())
+        if missing:
+            ev.steps.append({"name": "camera_loop", "ok": False, "duration_s": 0.0, "message": f"missing {missing}"})
+            ev.failures.append(f"camera_loop: missing {missing}")
+        else:
+            max_err = 0.0
+            camera_ok = True
+            for oid in sorted(all_ids):
+                err = float(
+                    np.linalg.norm(np.array([det_map[oid]["x"], det_map[oid]["y"]]) - np.array(gt[oid][:2]))
+                )
+                max_err = max(max_err, err)
+                if err > CAMERA_TOL_M:
+                    camera_ok = False
+                    ev.failures.append(f"camera_loop: {oid} det err {err:.4f} m")
+            ev.steps.append(
+                {"name": "camera_loop", "ok": camera_ok, "duration_s": 0.0, "message": f"max_err={max_err:.4f}"}
+            )
+
+    rec("open_drawer", env.open_drawer("left"))
+    rec("grasp_plate", env.grasp("left", "plate"))
+    rec("place_plate", env.place("left", "plate", "left_place"))
+    rec("grasp_cup", env.grasp("right", "cup"))
+    rec("place_cup", env.place("right", "cup", "right_place"))
+    rec("grasp_bottle", env.grasp("left", "bottle"))
+    rec("grasp_cup_for_pour", env.grasp("right", "cup"))
+    rec("pour", env.pour("left", "right", "bottle", "cup"))
+    rec("place_cup_after_pour", env.place("right", "cup", "right_place"))
+    rec("place_bottle", env.place("left", "bottle", "center_place"))
+
+    spoon_target, fork_target = _silverware_targets(env)
+    rec("grasp_spoon", env.grasp("left", "spoon"))
+    rec("handoff_spoon", env.handoff("left", "right", "spoon"))
+    rec("place_spoon", env.place("right", "spoon", spoon_target))
+    rec("grasp_fork", env.grasp("left", "fork"))
+    rec("place_fork", env.place("left", "fork", fork_target))
+
+    final = env.check_final_state(
+        {
+            "place": {"plate": "left_place", "cup": "right_place", "bottle": "center_place"},
+            "drawer_content": ["spoon", "fork"],
+            "drawer_open_min": 0.5,
+            "pour_required": True,
+        }
+    )
+    ev.steps.append({"name": "check_final_state", "ok": final["success"], "duration_s": 0.0, "message": str(final["failures"])})
+    if not final["success"]:
+        ev.failures.extend(final["failures"])
+
     ev.ok = not ev.failures
     ev.elapsed_s = round(time.perf_counter() - started, 3)
     return ev

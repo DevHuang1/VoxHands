@@ -10,3 +10,7 @@ env/
 
 # dotenv files may contain local secrets
 .env.local
+
+
+# generated policy weights, OpenVINO IR, and benchmark reports
+data/
