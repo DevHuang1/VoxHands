@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .intel_runtime import runtime_probe, self_test_status
+from .intel_runtime import runtime_probe, self_test_status, short_version
 
 
 def groq_status() -> dict[str, Any]:
@@ -61,9 +61,9 @@ def openvino_status() -> dict[str, Any]:
     if measured.get("state") == "ready":
         rate = async_report.get("throughput_infers_per_s")
     if rate:
-        mode = f"OpenVINO {probe['version']} on {host_cpu} · {device} · {rate:,.0f} inf/s async"
+        mode = f"OpenVINO {short_version(probe['version'])} on {host_cpu} · {device} · {rate:,.0f} inf/s async"
     else:
-        mode = f"OpenVINO {probe['version']} on {host_cpu}; {device} plugin ready"
+        mode = f"OpenVINO {short_version(probe['version'])} on {host_cpu}; {device} plugin ready"
     return {
         "name": "OpenVINO",
         "available": True,
@@ -118,8 +118,12 @@ def runtime_status() -> dict[str, Any]:
         },
         "vision": {
             "name": "MujocoVision",
-            "available": True,
-            "active": True,
-            "mode": "Overhead camera segmentation; OpenVINO inference when available",
+            "available": mujoco_active,
+            "active": mujoco_active,
+            "mode": (
+                "Overhead camera segmentation; OpenVINO inference when available"
+                if mujoco_active
+                else "Needs the MuJoCo renderer; browser 3D workcell active instead"
+            ),
         },
     }

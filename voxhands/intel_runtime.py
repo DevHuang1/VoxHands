@@ -41,6 +41,16 @@ _SELF_TEST: dict[str, Any] = {"state": "idle", "available": False}
 _PROBE: dict[str, Any] | None = None
 
 
+def short_version(version: str | None) -> str | None:
+    """Trim OpenVINO's build metadata for display (``2026.3.1-22476-...``)."""
+    if not version:
+        return version
+    parts = version.split(".")
+    if len(parts) < 3:
+        return version
+    return ".".join([parts[0], parts[1], parts[2].split("-")[0]])
+
+
 def host_cpu_model() -> str:
     """Best-effort brand string for the processor running this process."""
     try:
@@ -132,6 +142,7 @@ def self_test_status() -> dict[str, Any]:
     status["accelerators"] = probe["accelerators"]
     if status.get("openvino_version") is None:
         status["openvino_version"] = probe["version"]
+    status["openvino_version_short"] = short_version(status.get("openvino_version"))
     return status
 
 
@@ -217,6 +228,7 @@ def run_self_test(
 
     probe = runtime_probe()
     report["openvino_version"] = probe["version"]
+    report["openvino_version_short"] = short_version(probe["version"])
     report["available_devices"] = probe["devices"]
     report["accelerators"] = probe["accelerators"]
     report["duration_ms"] = round((time.perf_counter() - started) * 1000.0, 1)

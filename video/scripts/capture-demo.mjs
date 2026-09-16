@@ -64,13 +64,13 @@ const waitForState = async (predicate, label, timeoutMs = 60000) => {
   return null;
 };
 
-const shoot = (chrome, outFile) => {
+const shoot = (chrome, outFile, size = "1920,1080") => {
   const result = spawnSync(
     chrome,
     [
       "--hide-scrollbars",
       "--force-device-scale-factor=1",
-      "--window-size=1920,1080",
+      `--window-size=${size}`,
       "--use-gl=angle",
       "--use-angle=swiftshader",
       "--enable-unsafe-swiftshader",
@@ -95,6 +95,7 @@ const main = async () => {
   await post("/api/reset");
   await waitForState((state) => state.status === "idle", "idle state");
   shoot(chrome, path.join(OUT_DIR, "dashboard.png"));
+  shoot(chrome, path.join(OUT_DIR, "runtime.png"), "1920,2600");
 
   const refusal = await post("/api/command", {text: REFUSAL_COMMAND});
   console.log(`[capture] refusal request -> HTTP ${refusal.status}, status=${refusal.payload?.status}`);
