@@ -15,7 +15,12 @@ from .groq import GroqClient, ai_build_plan
 from .agent import run_agent
 
 
+# MuJoCo is an optional backend: the pure-Python simulation is the fallback.
+# Probe ``import mujoco`` explicitly, because the simulation modules import it
+# lazily and would otherwise look importable on a host without the dependency.
 try:
+    import mujoco as _mujoco  # noqa: F401
+
     from .mujoco_sim import MujocoTableSettingSimulation
     from .vision import MujocoVision
 
@@ -104,7 +109,8 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
             if raw_query:
                 parts = dict(pair.split("=", 1) for pair in raw_query.split("&") if "=" in pair)
                 camera = parts.get("camera", _DEFAULT_CAMERA)
-            frame = self.simulation.render_camera(camera, 640, 480)
+            render_camera = getattr(self.simulation, "render_camera", None)
+            frame = render_camera(camera, 640, 480) if render_camera is not None else None
             if frame is None:
                 self._json({"error": f"Camera '{camera}' unavailable."}, 404)
                 return
@@ -238,7 +244,7 @@ class VoxHandsServer(ThreadingHTTPServer):
         super().__init__(address, VoxHandsHandler)
         self.simulation = _make_simulation()
         self.vision: MujocoVision | None = None
-        if isinstance(self.simulation, MujocoTableSettingSimulation):
+        if _MUJOCO_AVAILABLE and isinstance(self.simulation, MujocoTableSettingSimulation):
             self.vision = MujocoVision(self.simulation)
         self.groq = GroqClient()
         self.daemon_threads = True
