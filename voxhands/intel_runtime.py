@@ -1,11 +1,15 @@
-"""Intel OpenVINO self-test for the host that actually serves the dashboard.
+"""OpenVINO self-test for the host that actually serves the dashboard.
 
 VoxHands runs on the Python standard library alone, so a bare checkout has no
 OpenVINO runtime and the dashboard honestly reports the integration as
 unavailable.  The reference deployment additionally installs the runtime
-(``requirements-render.txt``); a Render worker is an Intel Xeon, so the live
-demo can then report *genuine* compiled-model CPU inference measured on the
-machine answering requests instead of a claimed number from another host.
+(``requirements-render.txt``), so the live demo can report *genuine*
+compiled-model CPU inference measured on the machine answering requests rather
+than a number borrowed from a development laptop.
+
+The self-test records the processor brand string it measured on and never
+assumes a vendor: hosted CPUs vary (the reference Render worker reports an AMD
+EPYC), and Intel-specific NPU/GPU acceleration stays gated on Intel hardware.
 
 Everything in this module is best-effort and failure-isolated.  A missing
 runtime, a failed model build, or a slow host degrades to an explanatory

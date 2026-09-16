@@ -1,4 +1,6 @@
-# VoxHands core runs on the Python standard library only; this file stays
-# intentionally minimal so Render builds cleanly. The optional MuJoCo physics
-# backend, OpenVINO vision adapter, and Pillow JPEG encoding are listed in
-# requirements-optional.txt and auto-discovered at runtime.
+# VoxHands core runs on the Python standard library only, and every optional
+# backend is auto-discovered at runtime, so the code needs none of this. The
+# include below installs the OpenVINO runtime for the reference deployment so
+# the live demo can measure real compiled-model CPU inference on the host
+# serving requests. Remove the include to deploy the stdlib-only build.
+-r requirements-render.txt
