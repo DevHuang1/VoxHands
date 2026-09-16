@@ -1,2 +1,4 @@
-# VoxHands has no required third-party Python packages; the runtime is the
-# Python standard library. Keeping this file present lets Render build cleanly.
+# VoxHands core runs on the Python standard library only; this file stays
+# intentionally minimal so Render builds cleanly. The optional MuJoCo physics
+# backend, OpenVINO vision adapter, and Pillow JPEG encoding are listed in
+# requirements-optional.txt and auto-discovered at runtime.

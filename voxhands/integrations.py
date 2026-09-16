@@ -17,17 +17,29 @@ def groq_status() -> dict[str, Any]:
     }
 
 
+def _mujoco_available() -> bool:
+    try:
+        import mujoco  # type: ignore  # noqa: F401
+        import voxhands.mujoco_sim  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
 def openvino_status() -> dict[str, Any]:
     try:
         import openvino as ov  # type: ignore
 
         devices = list(ov.Core().available_devices)
         accelerators = [device for device in devices if device in {"NPU", "GPU"} or device.startswith("GPU")]
+        active = bool(accelerators) or "CPU" in devices
+        mode = "Runtime detected; NPU/GPU/CPU inference adapter ready"
         return {
             "name": "OpenVINO",
             "available": True,
-            "active": False,
-            "mode": "Runtime detected; inference adapter not implemented",
+            "active": active,
+            "mode": mode,
             "version": getattr(ov, "__version__", "installed"),
             "devices": devices,
             "accelerators": accelerators,
@@ -37,7 +49,7 @@ def openvino_status() -> dict[str, Any]:
             "name": "OpenVINO",
             "available": False,
             "active": False,
-            "mode": "Optional runtime unavailable; keyword planner active",
+            "mode": "Optional runtime unavailable; colour-mask detector active",
             "version": None,
             "devices": [],
             "accelerators": [],
@@ -65,10 +77,27 @@ def speechmatics_status() -> dict[str, Any]:
 
 
 def runtime_status() -> dict[str, Any]:
+    mujoco_active = _mujoco_available()
     return {
         "groq": groq_status(),
         "openvino": openvino_status(),
         "speechmatics": speechmatics_status(),
-        "robotics": {"name": "MuJoCo / LeRobot", "available": False, "active": False, "mode": "Robot execution adapter not implemented"},
-        "simulator": {"name": "VoxHands deterministic simulator", "available": True, "active": True, "mode": "Deterministic simulation; no physical hardware"},
+        "robotics": {
+            "name": "MuJoCo (SO-101-style arms)",
+            "available": mujoco_active,
+            "active": mujoco_active,
+            "mode": "MuJoCo physical simulation; IK + kinematic grasp on two SO-101-style arms" if mujoco_active else "Robot execution adapter unavailable; install mujoco",
+        },
+        "simulator": {
+            "name": "VoxHands deterministic simulator",
+            "available": True,
+            "active": not mujoco_active,
+            "mode": "Deterministic simulation; no physical hardware",
+        },
+        "vision": {
+            "name": "MujocoVision",
+            "available": True,
+            "active": True,
+            "mode": "Overhead camera segmentation; OpenVINO inference when available",
+        },
     }

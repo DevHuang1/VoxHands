@@ -1,4 +1,5 @@
-# Optional integrations. The core MVP uses only Python's standard library.
+# Optional integrations. The core MVP uses only Python's standard library;
+# the MuJoCo physics + vision backend is preferred when `mujoco` is installed.
 openvino==2026.3.0
 openvino-genai==2026.3.0
 speechmatics-rt

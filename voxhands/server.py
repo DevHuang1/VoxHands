@@ -9,15 +9,45 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from .simulation import TableSettingSimulation
 from .planner import build_plan
 from .safety import validate_plan
 from .groq import GroqClient, ai_build_plan
 from .agent import run_agent
 
 
+try:
+    from .mujoco_sim import MujocoTableSettingSimulation
+    from .vision import MujocoVision
+
+    _MUJOCO_AVAILABLE = True
+except Exception:  # pragma: no cover - exercised only without mujoco installed
+    _MUJOCO_AVAILABLE = False
+
+from .simulation import TableSettingSimulation
+
+
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
+
+_DEFAULT_CAMERA = "overhead"
+
+
+def _make_simulation() -> TableSettingSimulation:
+    if _MUJOCO_AVAILABLE:
+        return MujocoTableSettingSimulation()
+    return TableSettingSimulation()
+
+
+def _jpeg(frame: Any) -> tuple[str, bytes]:
+    """Encode an HxWx3 uint8 frame, preferring JPEG (Pillow) over BMP."""
+    try:
+        from .imageio import encode_jpeg
+
+        return "image/jpeg", encode_jpeg(frame)
+    except Exception:
+        from .imageio import encode_bmp
+
+        return "image/bmp", encode_bmp(frame)
 
 
 class VoxHandsHandler(BaseHTTPRequestHandler):
@@ -30,6 +60,10 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
     @property
     def groq(self) -> GroqClient:
         return self.server.groq  # type: ignore[attr-defined]
+
+    @property
+    def vision(self) -> MujocoVision | None:
+        return self.server.vision  # type: ignore[attr-defined]
 
     def _headers(self, content_type: str, length: int) -> None:
         self.send_header("Content-Type", content_type)
@@ -61,20 +95,42 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
-        if self.path == "/api/state":
+        route, _, raw_query = self.path.partition("?")
+        if route == "/api/state":
             self._json(self.simulation.snapshot())
+            return
+        if route == "/api/camera":
+            camera = _DEFAULT_CAMERA
+            if raw_query:
+                parts = dict(pair.split("=", 1) for pair in raw_query.split("&") if "=" in pair)
+                camera = parts.get("camera", _DEFAULT_CAMERA)
+            frame = self.simulation.render_camera(camera, 640, 480)
+            if frame is None:
+                self._json({"error": f"Camera '{camera}' unavailable."}, 404)
+                return
+            content_type, body = _jpeg(frame)
+            self.send_response(200)
+            self._headers(content_type, len(body))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if route == "/api/vision":
+            if self.vision is None:
+                self._json({"error": "Vision not available (mujoco missing)."}, 404)
+                return
+            self._json(self.vision.describe())
             return
         if self.path == "/api/health":
             self._json({"ok": True, "service": "voxhands", "version": "0.2.0"})
             return
-        if self.path.startswith("/vendor/"):
-            name = self.path.removeprefix("/vendor/")
+        if route.startswith("/vendor/"):
+            name = route.removeprefix("/vendor/")
             if name not in {"three.module.js", "rapier.es.js", "THREE-LICENSE.txt", "RAPIER-LICENSE.txt"}:
                 self._json({"error": "Not found"}, 404)
                 return
             self._serve_file(FRONTEND / "vendor" / name)
             return
-        if self.path in {"/", "/index.html"}:
+        if route in {"/", "/index.html"}:
             self._serve_file(FRONTEND / "index.html")
             return
         self._json({"error": "Not found"}, 404)
@@ -171,7 +227,8 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, format: str, *args: Any) -> None:
-        if self.path in {"/api/state", "/api/physics-event"} and args and str(args[1]) == "200":
+        route = self.path.partition("?")[0]
+        if route in {"/api/state", "/api/physics-event", "/api/camera"} and args and str(args[1]) == "200":
             return
         print(f"[voxhands] {self.address_string()} - {format % args}")
 
@@ -179,7 +236,10 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
 class VoxHandsServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int]) -> None:
         super().__init__(address, VoxHandsHandler)
-        self.simulation = TableSettingSimulation()
+        self.simulation = _make_simulation()
+        self.vision: MujocoVision | None = None
+        if isinstance(self.simulation, MujocoTableSettingSimulation):
+            self.vision = MujocoVision(self.simulation)
         self.groq = GroqClient()
         self.daemon_threads = True
 
@@ -204,3 +264,7 @@ def main() -> None:
         pass
     finally:
         server.server_close()
+
+
+if __name__ == "__main__":
+    main()

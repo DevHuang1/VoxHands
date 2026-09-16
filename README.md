@@ -45,6 +45,24 @@ use the live API normally.
 
 To stop the server, press `Ctrl+C` in the terminal where it is running.
 
+### MuJoCo physics + vision backend (recommended, optional)
+
+When `mujoco` is installed, the server swaps in the differentiated workcell:
+two SO-101-style six-DOF arms, a tabletop with a red safety zone, four trackable
+objects, and overhead/operator cameras, all driven by MuJoCo with
+inverse-kinematics pick-and-place:
+
+```bash
+python3.13 -m pip install mujoco   # Python 3.13 recommended for wheels
+python3.13 -m voxhands.server        # same endpoints; /api/camera + /api/vision active
+```
+
+The dashboard then shows the MuJoCo `OVERHEAD`/`OPERATOR` camera feed
+(picture-in-picture, bottom-left of the workcell) backed by the real renderer
+and a `MujocoVision` runtime badge. Without `mujoco`, the original
+deterministic simulator serves `/api/state` unchanged and `/api/camera`
+returns 404.
+
 ## Deploy to Render
 
 Render is a good fit because VoxHands is a stateful, long-running process:
@@ -91,6 +109,8 @@ Useful controls in the dashboard:
 - `Reset` returns the server and browser workcell to the latest reset state.
 - `Test contact` injects a local cup/barrier contact for telemetry testing.
 - `Top`, `Operator`, and `Reset view` change the 3D camera.
+- `OVERHEAD`/`OPERATOR` (bottom-left thumbnail) toggles the live MuJoCo camera
+  feed when the physics backend is active.
 
 ### Suggested summit demo flow
 
@@ -240,6 +260,8 @@ The local server exposes these endpoints:
 | --- | --- | --- |
 | `GET` | `/api/health` | Basic service health check. |
 | `GET` | `/api/state` | Current plan, objects, arms, motion, physics, events, and runtime status. |
+| `GET` | `/api/camera` | MuJoCo camera frame as `image/jpeg` (Pillow) or `image/bmp` (stdlib). Query `?camera=overhead` or `?camera=operator`. |
+| `GET` | `/api/vision` | Vision status: active detector (`color-mask` fallback or `openvino-mlp`) plus optional OpenVINO readiness. |
 | `POST` | `/api/plan` | Validate and preview a command without starting a run. |
 | `POST` | `/api/command` | Submit `{"text":"...", "style?":"", "gesture?":""}` for Groq tool control when configured, with deterministic planning fallback. |
 | `POST` | `/api/agent` | Explicit alias for the bounded Groq workcell tool loop. |
@@ -289,6 +311,11 @@ voxhands/agent.py         Bounded Groq tool definitions, loop, and dispatcher
 voxhands/styles.py        Movement-style registry, easing, and gesture keyframes
 voxhands/safety.py        Plan validation and red-zone safety rules
 voxhands/simulation.py    Deterministic 60 Hz server-side task simulation
+voxhands/mujoco_scene.py  MuJoCo scene wrapper: IK, attach/release, rendering
+voxhands/mujoco_sim.py    MuJoCo simulation backend (drop-in for simulation.py)
+voxhands/vision.py        MujocoVision: OpenVINO MLP + calibrated colour-mask
+voxhands/imageio.py       Pillow JPEG / stdlib BMP frame encoders
+voxhands/assets/scene.xml MuJoCo workcell model (two SO-101-style arms, cameras)
 voxhands/server.py        Standard-library HTTP server and API routes
 voxhands/models.py        Plan, action, and snapshot data models
 voxhands/integrations.py  Optional runtime availability detection
@@ -328,30 +355,35 @@ For a live browser check, verify all of the following:
 
 ## Optional integrations
 
-The core MVP does not install or require these packages. Install them only in
-the matching hardware, credentials, or hackathon environment and pin the
-versions there:
+Install them only in the matching hardware, credentials, or hackathon
+environment and pin the versions there:
 
 ```text
-openvino==2026.3.0
+mujoco                 # MuJoCo physics + per-frame rendering (recommended backend)
+openvino==2026.3.0     # optional vision inference (NPU/GPU/CPU)
 openvino-genai==2026.3.0
 speechmatics-rt
-mujoco
 lerobot
 ```
 
 The optional list is recorded in
 [`requirements-optional.txt`](requirements-optional.txt). The current UI
 labels unavailable integrations as demo/unavailable instead of claiming that
-the laptop is connected to hardware or an NPU.
+the laptop is connected to hardware or an NPU; when OpenVINO wheels are not
+available for the installed Python, `MujocoVision` transparently falls back to
+the calibrated colour-mask detector.
 
-## Future integration boundary
+## MuJoCo backend boundary
 
-The intended next step is to replace `TableSettingSimulation` with the
-Intel-provided MuJoCo/LeRobot backend while preserving the existing plan,
-safety, HTTP, and browser telemetry contracts. Groq tool control is gated on
-`GROQ_API_KEY`; the model can request only validated workcell tools, never raw
-motor commands or arbitrary physics mutation.
+`voxhands/mujoco_sim.MujocoTableSettingSimulation` is a drop-in
+`TableSettingSimulation`: it keeps the exact plan, safety, HTTP, event, and
+browser telemetry contracts while replacing motion with MuJoCo
+inverse-kinematics on two SO-101-style arms. `MujocoVision` reads real rendered
+camera frames; when the optional OpenVINO package is installed it runs a
+3→16→4 MLP detector on NPU→GPU→CPU, otherwise a geometric colour-mask detector
+tracks the four objects. Groq tool control remains gated on `GROQ_API_KEY` and
+the model can request only validated workcell tools, never raw motor commands
+or arbitrary physics mutation.
 
 ## Improved command and execution behavior
 
