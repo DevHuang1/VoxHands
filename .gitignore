@@ -15,6 +15,13 @@ env/
 # generated policy weights, OpenVINO IR, and benchmark reports
 data/
 
+# rendered slide decks (large; built by scripts/build_deck.py)
+*.pdf
+
+# rendered cover art and demo captures (large; hosted with the submission)
+submission/*.png
+submission/demo/
+
 # demo media (large; hosted on the hackathon project page, never committed)
 # video
 *.mp4
