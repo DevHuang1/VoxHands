@@ -1,7 +1,20 @@
 node_modules/
 out/
 .remotion/
+public/
 *.mp4
 *.webm
+*.mov
+*.mkv
+# audio
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.flac
+*.ogg
+*.opus
+*.aiff
+*.caf
 *.png
 !src/assets/**

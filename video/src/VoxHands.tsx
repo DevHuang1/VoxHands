@@ -1,5 +1,5 @@
 import React from "react";
-import {AbsoluteFill, Sequence, useCurrentFrame} from "remotion";
+import {AbsoluteFill, Audio, Sequence, interpolate, staticFile, useCurrentFrame} from "remotion";
 import {Slide} from "./components/Slide";
 import {WorkcellPlane} from "./components/WorkcellPlane";
 import {IconBadge, IconName} from "./components/Icon";
@@ -229,6 +229,15 @@ export const VoxHands: React.FC = () => {
 
   return (
     <AbsoluteFill style={{background: theme.bg}}>
+      <Audio
+        src={staticFile("soundtrack.mp3")}
+        volume={(f) =>
+          interpolate(f, [total - 45, total - 5], [1, 0], {
+            extrapolateLeft: "clamp",
+            extrapolateRight: "clamp",
+          })
+        }
+      />
       {scenes.map((scene, i) => (
         <Sequence
           key={scene.title}
