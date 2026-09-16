@@ -433,7 +433,7 @@ const SlideIntel: React.FC = () => (
     index={7}
     eyebrow="Intel track · OpenVINO"
     title="A real optimization path, measured."
-    subtitle="A genuine OpenVINO IR, quantized to INT8 with NNCF and benchmarked on Intel CPU."
+    subtitle="A genuine OpenVINO IR, quantized to INT8 with NNCF and benchmarked on CPU."
 
     accent="cyan"
     dense

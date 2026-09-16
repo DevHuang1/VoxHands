@@ -108,7 +108,7 @@ class OpenVINOAdapter:
                 "verified": False,
                 "message": f"openvino {getattr(ov, '__version__', 'installed')} is installed but only CPU is exposed ({devices}); GPU/NPU acceleration is blocked/unverified on this host (INT8 post-training quantization still runs on CPU).",
             }
-        device_used = "GPU" if accelerators else "NPU"
+        device_used = accelerators[0]
         return {
             "installed": True,
             "devices": devices,
@@ -255,7 +255,7 @@ def quantize_ir(
 
     Runs NNCF's PTQ on the CPU with a calibration set sampled from the policy's
     input distribution and saves a genuine quantized IR (``.xml`` + ``.bin``).
-    Quantization is a real acceleration technique on Intel CPU; NPU/GPU target
+    Quantization is a real acceleration technique on CPU; NPU/GPU target
     graphs are gated on hardware and are *not* claimed here.
     """
     try:
