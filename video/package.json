@@ -1,0 +1,23 @@
+{
+  "name": "voxhands-video",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VoxHands summit demo video (Remotion)",
+  "scripts": {
+    "dev": "remotion studio",
+    "render": "remotion render VoxHands out/VoxHands.mp4",
+    "render:4k": "remotion render VoxHands out/VoxHands-4k.mp4 --scale=2",
+    "still": "remotion still VoxHands out/poster.png --frame=60"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.525",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "remotion": "4.0.525"
+  },
+  "devDependencies": {
+    "@types/react": "19.0.0",
+    "@types/react-dom": "19.0.0",
+    "typescript": "5.6.3"
+  }
+}
