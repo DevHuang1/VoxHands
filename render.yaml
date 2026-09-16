@@ -1,13 +1,14 @@
 services:
   - type: web
     name: voxhands
-    runtime: python
+    runtime: docker
     region: oregon
-    buildCommand: pip install -r requirements-render.txt
-    startCommand: python run.py
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
+      # Headless container: MuJoCo renders offscreen through EGL. The libraries
+      # are installed in the Dockerfile; this selects the backend.
+      - key: MUJOCO_GL
+        value: egl
       - key: GROQ_API_KEY
         sync: false

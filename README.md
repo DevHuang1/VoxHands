@@ -106,13 +106,16 @@ Deploy with the included blueprint:
 4. Keep `HOST`/`PORT` defaults: the server binds `0.0.0.0` and reads Render's
    `$PORT`. Health checks use `/api/health`.
 
-Render installs only `requirements.txt`, which is the standard library on
-purpose, so `mujoco`, `openvino`, and `Pillow` are absent. The server detects
-that at startup and falls back to the pure-Python simulation: `/api/camera` and
-`/api/vision` return `unavailable`, while the browser-side Three.js/Rapier
-workcell keeps the dashboard fully interactive. Add the optional packages to
-`requirements.txt` if you want the MuJoCo renderer on Render (it needs a larger
-instance).
+The blueprint builds the included `Dockerfile`, which pins Python 3.13 and
+installs `requirements-render.txt` (`mujoco`, `Pillow`, and the OpenVINO
+runtime) on top of an EGL/OSMesa GL stack, so the deployed service runs the real
+MuJoCo SO-101 workcell. The container is why the blueprint uses Docker rather
+than Render's native Python runtime: the renderer needs EGL/OSMesa system
+libraries that Render only allows via a Dockerfile. `MUJOCO_GL=egl` selects the
+offscreen backend. A larger instance is recommended because MuJoCo physics and
+rendering are noticeably heavier than the stdlib-only build; on a host without a
+working GL backend the physics stays active and `/api/camera` returns 404 while
+the browser-side Three.js/Rapier workcell keeps the dashboard interactive.
 
 The server honors `Ctrl+C` locally and handles Render's `SIGTERM` gracefully.
 Free-tier instances can sleep after idle; a cold start can take about a minute
@@ -342,8 +345,10 @@ clients submit intent and browser observations only.
 
 ```text
 run.py                    Local server entry point (reads HOST/PORT env)
-render.yaml               Render Blueprint deployment configuration
-runtime.txt               Render Python version pin (3.11.9)
+render.yaml               Render Blueprint deployment configuration (Docker)
+Dockerfile                Render image: Python 3.13 + EGL/OSMesa + MuJoCo deps
+.dockerignore             Keep demo media and generated data out of the image
+runtime.txt               Python version pin for a native (non-Docker) build
 requirements.txt          Empty on purpose; VoxHands is standard-library-only
 voxhands/planner.py       Keyword command parsing and arm/target assignment
 voxhands/groq.py          Groq LLM client, system prompt, and AI plan builder
@@ -468,8 +473,8 @@ What each stage actually does:
 
 ### Measured sweep: where INT8 pays off
 
-Apple CPU, OpenVINO 2026.3.1, FP16 inference hint, median of 5 repeats; the
-per-model `.bin` is FP32 vs NNCF INT8. Reproduce with
+Apple M4 CPU (development host), OpenVINO 2026.3.1, FP16 inference hint, median
+of 5 repeats; the per-model `.bin` is FP32 vs NNCF INT8. Reproduce with
 `python3.13 scripts/benchmark_openvino.py --sweep --throughput`.
 
 | Model (layers) | Params | FP32 latency | INT8 latency | Latency speedup | INT8 `.bin` |
@@ -481,6 +486,30 @@ per-model `.bin` is FP32 vs NNCF INT8. Reproduce with
 
 Async throughput improves with INT8 as the model becomes compute-bound:
 `workcell-xlarge` rises from **2,723 → 5,003 inf/s (1.84×)**.
+
+### Measured on the deployed host (live `/api/intel`)
+
+The reference deployment installs the OpenVINO runtime and the MuJoCo backend
+(`requirements-render.txt`), so the live demo self-tests on boot and publishes
+the result at [`/api/intel`](https://voxhands.onrender.com/api/intel).
+It builds real IRs from the policy weights plus a deployment-scale stand-in,
+compiles them with the CPU plugin, and reports the processor it measured on:
+
+| Model (layers) | Params | Latency | Async throughput |
+| --- | --- | --- | --- |
+| `policy` (8→16→16→8) | 552 | 0.51 ms | 1,072 inf/s |
+| `workcell-large` (256→2048→2048→128) | 4,984,960 | 28.0 ms | 45 inf/s |
+
+Host: **AMD EPYC 7R13**, OpenVINO 2026.3.1, `available_devices: ["CPU"]`.
+
+This is deliberately unflattering and deliberately published. The deployment
+runs on a shared, throttled free-tier vCPU, so these figures are roughly 25×
+slower than the same self-test on the Apple M4 used for the sweep above
+(0.021 ms for `policy`). The claim is **not** that these are good numbers, or
+that they represent Intel silicon — the brand string is reported verbatim and
+the deployment makes no vendor claim. The claim is that the same OpenVINO
+Runtime API the SO-101 vision worker would use executes end to end in
+production, on the host serving requests.
 
 Honest reading of the data:
 
@@ -499,9 +528,11 @@ What is verified vs. gated:
   `compile_model` CPU inference; NNCF INT8 PTQ; measured CPU latency and async
   throughput; the 1.2×–1.7× speedup at deployment scale.
 - **Gated, NOT verified**: GPU inference, NPU inference, and GPU/NPU INT8 kernels.
-  On this Apple host `ov.Core().available_devices` returns `['CPU']`, so
-  `verified` is `False`, `device_used` is `"CPU"`, and no GPU/NPU numbers are
-  fabricated.
+  Neither the development host nor the deployment exposes anything but `CPU`
+  (`ov.Core().available_devices` returns `['CPU']` on both), so no GPU/NPU
+  numbers are fabricated. Testing NPU acceleration would require Intel Core
+  Ultra hardware, which this project was not developed against — that gap is
+  stated rather than papered over.
 
 `OpenVINOAdapter` (in `voxhands/openvino_adapter.py`) is the single honest source
 for this state. Its `convert()` method remains an optional ONNX-free numpy

@@ -9,3 +9,10 @@
 # hardware.
 numpy==2.2.6
 openvino==2026.3.1
+# MuJoCo physics + per-frame rendering so the live service runs the real
+# SO-101-style workcell instead of the deterministic fallback. Pillow encodes
+# the overhead camera frame as JPEG (the stdlib BMP path is used without it).
+# Headless Linux rendering needs a GL backend (EGL/OSMesa); without one the
+# camera endpoint degrades to 404 while the physics backend stays active.
+mujoco==3.13.0
+Pillow==12.0.0
