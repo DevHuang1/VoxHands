@@ -14,3 +14,8 @@ env/
 
 # generated policy weights, OpenVINO IR, and benchmark reports
 data/
+
+# demo media (large; hosted on the hackathon project page, never committed)
+*.mp4
+*.mov
+*.webm

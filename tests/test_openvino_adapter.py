@@ -10,8 +10,10 @@ from voxhands.openvino_adapter import (
     OpenVINOAdapter,
     REQUIRED_STATUS_KEYS,
     benchmark_inference,
+    benchmark_throughput,
     build_openvino_model,
     load_policy_weights,
+    make_mlp_weights,
     quantize_ir,
 )
 
@@ -172,6 +174,38 @@ class OpenVINOQuantizationTests(unittest.TestCase):
             fp32_out = np.asarray(fp32_compiled([probe])[fp32_compiled.output(0)]).reshape(-1)
             int8_out = np.asarray(int8_compiled([probe])[int8_compiled.output(0)]).reshape(-1)
             np.testing.assert_allclose(int8_out, fp32_out, rtol=0.1, atol=0.1)
+
+
+@unittest.skipUnless(OPENVINO_AVAILABLE, OPENVINO_SKIP_REASON or "openvino not importable")
+class OpenVINOSweepTests(unittest.TestCase):
+    def test_make_mlp_weights_shapes_and_determinism(self) -> None:
+        sizes = [8, 32, 16, 4]
+        weights = make_mlp_weights(sizes, seed=3)
+        self.assertEqual(weights["input_dim"], 8)
+        self.assertEqual(weights["hidden_dims"], [32, 16])
+        self.assertEqual(weights["output_dim"], 4)
+        self.assertEqual(len(weights["weights"]), 3)
+        self.assertEqual(weights["weights"][0].shape, (8, 32))
+        self.assertEqual(weights["weights"][-1].shape, (16, 4))
+        self.assertTrue(np.allclose(weights["weights"][0], make_mlp_weights(sizes, seed=3)["weights"][0]))
+
+    def test_benchmark_repeats_and_mode_keys(self) -> None:
+        weights = make_mlp_weights([8, 16, 16, 8], seed=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            xml = OpenVINOAdapter().to_ir(weights, Path(tmp) / "ir")
+            report = benchmark_inference(xml, iterations=15, warmup=2, repeats=3, performance_mode="latency")
+            self.assertEqual(report["repeats"], 3)
+            self.assertEqual(report["performance_mode"], "latency")
+            self.assertIn("bin_size_bytes", report)
+            self.assertGreater(report["latency_ms_mean"], 0)
+
+    def test_benchmark_throughput_positive(self) -> None:
+        weights = make_mlp_weights([8, 16, 16, 8], seed=2)
+        with tempfile.TemporaryDirectory() as tmp:
+            xml = OpenVINOAdapter().to_ir(weights, Path(tmp) / "ir")
+            report = benchmark_throughput(xml, requests=200, jobs=4, warmup=20)
+            self.assertGreater(report["throughput_infers_per_s"], 0)
+            self.assertEqual(report["requests"], 200)
 
 
 @unittest.skipUnless(OPENVINO_AVAILABLE, OPENVINO_SKIP_REASON or "openvino not importable")

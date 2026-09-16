@@ -286,18 +286,65 @@ def quantize_ir(
     return xml_out
 
 
+def make_mlp_weights(
+    sizes: list[int],
+    seed: int = 0,
+    scale: float = 0.02,
+    activation: str = "relu",
+) -> dict[str, Any]:
+    """Deterministic synthetic MLP weights for a layer-size sweep.
+
+    ``sizes`` is ``[input_dim, hidden..., output_dim]``.  Random-but-seeded so
+    the sweep is reproducible across hosts without shipping model files.
+    """
+    if len(sizes) < 2:
+        raise ValueError("sizes must contain at least input and output dims")
+    rng = np.random.default_rng(seed)
+    weights: list[np.ndarray] = []
+    biases: list[np.ndarray] = []
+    for i in range(len(sizes) - 1):
+        weights.append((rng.standard_normal((sizes[i], sizes[i + 1])) * scale).astype(np.float32))
+        biases.append(np.zeros(sizes[i + 1], dtype=np.float32))
+    return {
+        "input_dim": int(sizes[0]),
+        "hidden_dims": [int(s) for s in sizes[1:-1]],
+        "output_dim": int(sizes[-1]),
+        "activation": activation,
+        "weights": weights,
+        "biases": biases,
+    }
+
+
+def _compile_config(ov: Any, performance_mode: str | None, num_streams: int | None) -> dict[str, Any]:
+    config: dict[str, Any] = {}
+    if performance_mode == "throughput":
+        config[ov.properties.hint.performance_mode] = ov.properties.hint.PerformanceMode.THROUGHPUT
+    elif performance_mode == "latency":
+        config[ov.properties.hint.performance_mode] = ov.properties.hint.PerformanceMode.LATENCY
+    if num_streams:
+        config[ov.properties.streams.num] = int(num_streams)
+    return config
+
+
 def benchmark_inference(
     xml_path: str | Path,
     iterations: int = 2000,
     device: str = "CPU",
     warmup: int = 50,
     sample: np.ndarray | None = None,
+    performance_mode: str | None = None,
+    num_streams: int | None = None,
+    repeats: int = 1,
 ) -> dict[str, Any]:
     """Measure real OpenVINO compiled-model latency for an IR.
 
     Returns p50/p95/mean latency (ms), throughput (inferences/s), the model's
     on-disk size, the runtime inference precision, and the device actually used.
-    No GPU/NPU numbers are produced — the caller passes the device under test.
+    ``performance_mode`` selects OpenVINO's latency/throughput hint and
+    ``num_streams`` sets the CPU stream count.  With ``repeats > 1`` the reported
+    latency/throughput are the median across repeats so a single noisy pass
+    cannot mislead.  No GPU/NPU numbers are produced — the caller passes the
+    device under test.
     """
     try:
         import openvino as ov
@@ -309,44 +356,111 @@ def benchmark_inference(
 
     xml_path = Path(xml_path)
     core = ov.Core()
-    compiled = core.compile_model(str(xml_path), device)
+    config = _compile_config(ov, performance_mode, num_streams)
+    compiled = core.compile_model(str(xml_path), device, config) if config else core.compile_model(str(xml_path), device)
     input_port = compiled.input(0)
     input_dim = int(input_port.partial_shape[1].get_length())
     if sample is None:
         sample = np.zeros((1, input_dim), dtype=np.float32)
     sample = np.asarray(sample, dtype=np.float32)
 
-    for _ in range(max(0, warmup)):
-        compiled([sample])
-
-    latencies: list[float] = []
-    for _ in range(max(1, iterations)):
-        start = time.perf_counter()
-        compiled([sample])
-        latencies.append((time.perf_counter() - start) * 1000.0)
-
-    latencies.sort()
-    mean = statistics.fmean(latencies)
-    p50 = latencies[len(latencies) // 2]
-    p95 = latencies[min(len(latencies) - 1, int(round(0.95 * (len(latencies) - 1))))]
     size_bytes = xml_path.stat().st_size
     bin_path = xml_path.with_suffix(".bin")
-    if bin_path.exists():
-        size_bytes += bin_path.stat().st_size
+    bin_bytes = bin_path.stat().st_size if bin_path.exists() else 0
+    size_bytes += bin_bytes
     try:
         precision = str(compiled.get_property("INFERENCE_PRECISION_HINT"))
     except Exception:
         precision = "unknown"
 
+    passes: list[dict[str, float]] = []
+    for _ in range(max(1, repeats)):
+        for _ in range(max(0, warmup)):
+            compiled([sample])
+        latencies: list[float] = []
+        for _ in range(max(1, iterations)):
+            start = time.perf_counter()
+            compiled([sample])
+            latencies.append((time.perf_counter() - start) * 1000.0)
+        latencies.sort()
+        mean = statistics.fmean(latencies)
+        passes.append(
+            {
+                "mean": mean,
+                "p50": latencies[len(latencies) // 2],
+                "p95": latencies[min(len(latencies) - 1, int(round(0.95 * (len(latencies) - 1))))],
+            }
+        )
+
+    mean = statistics.median(p["mean"] for p in passes)
+    p50 = statistics.median(p["p50"] for p in passes)
+    p95 = statistics.median(p["p95"] for p in passes)
     return {
         "model": xml_path.name,
         "device": device,
         "iterations": iterations,
+        "repeats": repeats,
+        "performance_mode": performance_mode or "default",
+        "num_streams": num_streams,
         "latency_ms_mean": round(mean, 5),
         "latency_ms_p50": round(p50, 5),
         "latency_ms_p95": round(p95, 5),
         "throughput_infers_per_s": round(1000.0 / mean, 1) if mean > 0 else None,
         "model_size_bytes": size_bytes,
         "model_size_kib": round(size_bytes / 1024.0, 2),
+        "bin_size_bytes": bin_bytes,
+        "bin_size_kib": round(bin_bytes / 1024.0, 2),
         "inference_precision": precision,
+    }
+
+
+def benchmark_throughput(
+    xml_path: str | Path,
+    requests: int = 4000,
+    jobs: int = 8,
+    device: str = "CPU",
+    num_streams: int | None = None,
+    warmup: int = 200,
+    sample: np.ndarray | None = None,
+) -> dict[str, Any]:
+    """Aggregate throughput via ``ov.AsyncInferQueue`` (real concurrent load).
+
+    A single sequential call chain cannot benefit from multiple streams; queuing
+    ``jobs`` async requests lets the CPU run streams concurrently and measures
+    true inferences/second.
+    """
+    try:
+        import openvino as ov
+    except Exception as exc:  # pragma: no cover - host without openvino
+        raise RuntimeError(f"openvino not importable: {exc}") from exc
+
+    import time
+
+    xml_path = Path(xml_path)
+    core = ov.Core()
+    config = _compile_config(ov, "throughput", num_streams)
+    compiled = core.compile_model(str(xml_path), device, config) if config else core.compile_model(str(xml_path), device)
+    input_dim = int(compiled.input(0).partial_shape[1].get_length())
+    if sample is None:
+        sample = np.zeros((1, input_dim), dtype=np.float32)
+    sample = np.asarray(sample, dtype=np.float32)
+
+    queue = ov.AsyncInferQueue(compiled, max(1, jobs))
+    for _ in range(max(0, warmup)):
+        queue.start_async([sample])
+    queue.wait_all()
+
+    start = time.perf_counter()
+    for _ in range(max(1, requests)):
+        queue.start_async([sample])
+    queue.wait_all()
+    elapsed = time.perf_counter() - start
+    return {
+        "model": xml_path.name,
+        "device": device,
+        "jobs": max(1, jobs),
+        "num_streams": num_streams,
+        "requests": max(1, requests),
+        "elapsed_s": round(elapsed, 4),
+        "throughput_infers_per_s": round(max(1, requests) / elapsed, 1) if elapsed > 0 else None,
     }

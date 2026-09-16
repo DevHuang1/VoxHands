@@ -1,9 +1,9 @@
 # Optional integrations. The core MVP uses only Python's standard library;
 # the MuJoCo physics + vision backend is preferred when `mujoco` is installed.
-openvino==2026.3.0
+openvino==2026.3.1
 openvino-genai==2026.3.0
-nncf>=2.19.0            # INT8 post-training quantization of the policy/vision IR (CPU)
+nncf==3.3.0             # INT8 post-training quantization of the policy/vision IR (CPU)
 speechmatics-rt
-mujoco
+mujoco==3.13.0
 lerobot
 
