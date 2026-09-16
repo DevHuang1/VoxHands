@@ -3,7 +3,7 @@ services:
     name: voxhands
     runtime: python
     region: oregon
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements-render.txt
     startCommand: python run.py
     healthCheckPath: /api/health
     envVars:

@@ -13,6 +13,7 @@ from .planner import build_plan
 from .safety import validate_plan
 from .groq import GroqClient, ai_build_plan
 from .agent import run_agent
+from .intel_runtime import self_test_status, start_self_test
 
 
 # MuJoCo is an optional backend: the pure-Python simulation is the fallback.
@@ -125,6 +126,9 @@ class VoxHandsHandler(BaseHTTPRequestHandler):
                 self._json({"error": "Vision not available (mujoco missing)."}, 404)
                 return
             self._json(self.vision.describe())
+            return
+        if route == "/api/intel":
+            self._json(self_test_status())
             return
         if self.path == "/api/health":
             self._json({"ok": True, "service": "voxhands", "version": "0.2.0"})
@@ -248,6 +252,9 @@ class VoxHandsServer(ThreadingHTTPServer):
             self.vision = MujocoVision(self.simulation)
         self.groq = GroqClient()
         self.daemon_threads = True
+        # Measure real OpenVINO inference on this host in the background; the
+        # dashboard polls /api/intel for the result.  No-op without the runtime.
+        start_self_test()
 
 
 def main() -> None:

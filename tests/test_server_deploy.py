@@ -6,9 +6,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Render installs only requirements.txt (the standard library), so MuJoCo,
-# OpenVINO, and Pillow are absent at runtime. Block those imports and confirm
-# the server still boots and degrades gracefully.
+# A bare checkout needs nothing beyond the standard library, and blocking the
+# optional imports must still leave a working server. The reference Render
+# build adds the Intel OpenVINO runtime on top (requirements-render.txt); this
+# probe pins the degradation path for hosts that do not.
 PROBE = """
 import json, sys, threading, time, urllib.error, urllib.request
 for name in ("mujoco", "openvino", "PIL"):
@@ -37,6 +38,7 @@ report = {
     "health": hit("/api/health"),
     "camera": hit("/api/camera"),
     "vision_endpoint": hit("/api/vision"),
+    "intel": hit("/api/intel"),
 }
 server.shutdown()
 print("RESULT:" + json.dumps(report))
@@ -71,6 +73,12 @@ class RenderDeployTests(unittest.TestCase):
         self.assertIn("unavailable", report["camera"][1]["error"])
 
         self.assertEqual(report["vision_endpoint"][0], 404)
+
+        intel = report["intel"][1]
+        self.assertEqual(report["intel"][0], 200)
+        self.assertEqual(intel["state"], "unavailable")
+        self.assertFalse(intel["available"])
+        self.assertTrue(intel["host_cpu"])
 
 
 if __name__ == "__main__":

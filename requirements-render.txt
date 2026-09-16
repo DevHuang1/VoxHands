@@ -1,0 +1,10 @@
+# Reference deployment runtime for VoxHands.
+
+# The core project runs on the Python standard library alone (see
+# requirements.txt).  The Render deployment additionally installs the Intel
+# OpenVINO runtime so the live demo measures genuine compiled-model inference on
+# the processor actually serving requests -- Render workers run on Intel Xeon.
+# Without this file the dashboard reports OpenVINO as unavailable, which is the
+# honest stdlib-only mode.
+numpy==2.2.6
+openvino==2026.3.1

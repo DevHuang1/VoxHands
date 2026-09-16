@@ -422,12 +422,16 @@ def benchmark_throughput(
     num_streams: int | None = None,
     warmup: int = 200,
     sample: np.ndarray | None = None,
+    performance_mode: str | None = "throughput",
 ) -> dict[str, Any]:
     """Aggregate throughput via ``ov.AsyncInferQueue`` (real concurrent load).
 
     A single sequential call chain cannot benefit from multiple streams; queuing
     ``jobs`` async requests lets the CPU run streams concurrently and measures
-    true inferences/second.
+    true inferences/second.  ``performance_mode`` defaults to OpenVINO's
+    throughput hint, which sizes the stream pool to the core count; pass
+    ``None`` to keep the default (latency-sized) compilation, which avoids the
+    multi-process stream pool the CPU plugin uses on Apple silicon.
     """
     try:
         import openvino as ov
@@ -438,7 +442,7 @@ def benchmark_throughput(
 
     xml_path = Path(xml_path)
     core = ov.Core()
-    config = _compile_config(ov, "throughput", num_streams)
+    config = _compile_config(ov, performance_mode, num_streams)
     compiled = core.compile_model(str(xml_path), device, config) if config else core.compile_model(str(xml_path), device)
     input_dim = int(compiled.input(0).partial_shape[1].get_length())
     if sample is None:

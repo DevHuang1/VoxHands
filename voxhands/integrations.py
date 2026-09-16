@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from .intel_runtime import runtime_probe, self_test_status
+
 
 def groq_status() -> dict[str, Any]:
     has_key = bool(os.getenv("GROQ_API_KEY"))
@@ -28,23 +30,16 @@ def _mujoco_available() -> bool:
 
 
 def openvino_status() -> dict[str, Any]:
-    try:
-        import openvino as ov  # type: ignore
+    """Report the Intel OpenVINO runtime on this specific host.
 
-        devices = list(ov.Core().available_devices)
-        accelerators = [device for device in devices if device in {"NPU", "GPU"} or device.startswith("GPU")]
-        active = bool(accelerators) or "CPU" in devices
-        mode = "Runtime detected; NPU/GPU/CPU inference adapter ready"
-        return {
-            "name": "OpenVINO",
-            "available": True,
-            "active": active,
-            "mode": mode,
-            "version": getattr(ov, "__version__", "installed"),
-            "devices": devices,
-            "accelerators": accelerators,
-        }
-    except Exception:
+    The stdlib-only build reports it as unavailable; the reference deployment
+    installs the runtime, in which case the entry carries the processor brand
+    string plus whatever the boot self-test measured on this machine.
+    """
+    probe = runtime_probe()
+    measured = self_test_status()
+    host_cpu = measured.get("host_cpu", "unknown CPU")
+    if not probe["installable"]:
         return {
             "name": "OpenVINO",
             "available": False,
@@ -53,7 +48,34 @@ def openvino_status() -> dict[str, Any]:
             "version": None,
             "devices": [],
             "accelerators": [],
+            "host_cpu": host_cpu,
+            "self_test": measured,
         }
+
+    devices = probe["devices"]
+    accelerators = probe["accelerators"]
+    active = bool(accelerators) or "CPU" in devices
+    device = accelerators[0] if accelerators else (devices[0] if devices else "CPU")
+    rate = None
+    async_report = (measured.get("async") or {}).get("policy") or {}
+    if measured.get("state") == "ready":
+        rate = async_report.get("throughput_infers_per_s")
+    if rate:
+        mode = f"OpenVINO {probe['version']} on {host_cpu} · {device} · {rate:,.0f} inf/s async"
+    else:
+        mode = f"OpenVINO {probe['version']} on {host_cpu}; {device} plugin ready"
+    return {
+        "name": "OpenVINO",
+        "available": True,
+        "active": active,
+        "mode": mode,
+        "version": probe["version"],
+        "devices": devices,
+        "accelerators": accelerators,
+        "host_cpu": host_cpu,
+        "device_used": device,
+        "self_test": measured,
+    }
 
 
 def speechmatics_status() -> dict[str, Any]:
